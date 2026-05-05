@@ -48,6 +48,52 @@ unlinked_spec.ds
 
 # Android related
 **/android/**/gradle-wrapper.jar
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Python specific
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+venv/
+ENV/
+env/
+.venv
+db.sqlite3
+db.sqlite3-journal
+/media
+/staticfiles
+.coverage
+htmlcov/
+.mypy_cache
+.dmypy.json
+dmypy.json
+.pytest_cache/
+
+# IDE
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Docker
+docker-compose.override.yml
+.docker/
+
+# OS
+.DS_Store
+Thumbs.db
+*.tmp
+
+# Secrets
+*.key
+*.pem
+*.crt
+secrets/
 .gradle/
 **/android/captures/
 **/android/gradlew

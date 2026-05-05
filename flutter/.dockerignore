@@ -1,0 +1,68 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Flutter
+.dart_tool/
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+pubspec.lock
+
+# IDEs
+.vscode
+.idea
+*.iml
+*.iws
+*.ipr
+*.sw*
+*~
+.DS_Store
+
+# Logs
+*.log
+.logs/
+
+# Android
+android/.gradle/
+android/build/
+android/.idea/
+android/*.gradle
+android/local.properties
+
+# iOS
+ios/Pods/
+ios/Podfile.lock
+ios/Flutter/Generated.xcconfig
+ios/Flutter/Flutter.framework
+ios/Flutter/Flutter.podspec
+
+# Build outputs
+/dist/
+/build/
+/*.apk
+/*.whl
+
+# Python cache
+__pycache__
+*.py[cod]
+*.pyc
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Documentation
+README.md
+CHANGELOG.md
+LICENSE
+
+# Misc
+.DS_Store
+.AppleDouble
+.LSOverride
