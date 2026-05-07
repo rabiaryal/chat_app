@@ -1,7 +1,7 @@
 /// Chat Message Model with streaming support and status tracking
 import 'package:equatable/equatable.dart';
 
-enum MessageStatus { sending, streaming, delivered, error }
+enum MessageStatus { sending, streaming, delivered, read, error }
 
 enum MessageType { text, image, ai }
 
@@ -18,6 +18,10 @@ class ChatMessage extends Equatable {
   final String? avatarUrl;
   final String? imageUrl;
   final String? errorMessage;
+  final bool isSecure;
+  final String? encryptedPayload;
+  final String? encryptedKey;
+  final String? iv;
 
   const ChatMessage({
     required this.id,
@@ -32,6 +36,10 @@ class ChatMessage extends Equatable {
     this.avatarUrl,
     this.imageUrl,
     this.errorMessage,
+    this.isSecure = false,
+    this.encryptedPayload,
+    this.encryptedKey,
+    this.iv,
   });
 
   /// Copy with modifications
@@ -48,6 +56,10 @@ class ChatMessage extends Equatable {
     String? avatarUrl,
     String? imageUrl,
     String? errorMessage,
+    bool? isSecure,
+    String? encryptedPayload,
+    String? encryptedKey,
+    String? iv,
   }) {
     return ChatMessage(
       id: id ?? this.id,
@@ -62,6 +74,10 @@ class ChatMessage extends Equatable {
       avatarUrl: avatarUrl ?? this.avatarUrl,
       imageUrl: imageUrl ?? this.imageUrl,
       errorMessage: errorMessage ?? this.errorMessage,
+      isSecure: isSecure ?? this.isSecure,
+      encryptedPayload: encryptedPayload ?? this.encryptedPayload,
+      encryptedKey: encryptedKey ?? this.encryptedKey,
+      iv: iv ?? this.iv,
     );
   }
 
@@ -70,20 +86,86 @@ class ChatMessage extends Equatable {
     Map<String, dynamic> data,
     String roomId,
   ) {
+    final bool isSecure = data['type'] == 'secure_message';
     return ChatMessage(
-      id: data['message_id'] ??
+      id: data['message_id']?.toString() ??
+          data['timestamp']?.toString() ??
           DateTime.now().millisecondsSinceEpoch.toString(),
-      content: data['content'] ?? '',
-      userId: data['user_id'] ?? 0,
-      username: data['username'] ?? 'Unknown',
+      content: isSecure 
+          ? '[Secure Message]' 
+          : (data['content']?.toString() ?? data['text']?.toString() ?? ''),
+      userId: data['user_id'] ?? data['sender_id'] ?? 0,
+      username: data['username'] ?? data['sender_username'] ?? 'Unknown',
       roomId: roomId,
       type: _parseMessageType(data['message_type'] ?? 'TEXT'),
       status: MessageStatus.delivered,
       isBot: data['is_bot'] ?? false,
       timestamp: DateTime.parse(
-        data['timestamp'] ?? DateTime.now().toIso8601String(),
+        data['timestamp']?.toString() ?? DateTime.now().toIso8601String(),
       ),
+      isSecure: isSecure,
+      encryptedPayload: data['encrypted_payload'],
+      encryptedKey: data['encrypted_key'],
+      iv: data['iv'],
     );
+  }
+
+  /// Convert from API or cache JSON
+  factory ChatMessage.fromJson(
+    Map<String, dynamic> json, {
+    String? fallbackRoomId,
+  }) {
+    final messageType = json['message_type']?.toString() ?? 'TEXT';
+    final roomValue = json['room']?.toString() ??
+        json['room_id']?.toString() ??
+        fallbackRoomId ??
+        '';
+
+    return ChatMessage(
+      id: json['id']?.toString() ??
+          DateTime.now().millisecondsSinceEpoch.toString(),
+      content: json['content']?.toString() ?? json['text']?.toString() ?? '',
+      userId: _parseInt(json['sender']) ?? _parseInt(json['user_id']) ?? 0,
+      username: json['sender_username']?.toString() ??
+          json['username']?.toString() ??
+          'Unknown',
+      roomId: roomValue,
+      type: _parseMessageType(messageType),
+      status: json['is_read'] == true ? MessageStatus.read : MessageStatus.delivered,
+      isBot: json['is_bot'] == true || messageType == 'AI_RESPONSE',
+      timestamp: DateTime.tryParse(
+            json['created_at']?.toString() ??
+                json['timestamp']?.toString() ??
+                '',
+          ) ??
+          DateTime.now(),
+      isSecure: json['is_secure'] ?? false,
+      encryptedPayload: json['encrypted_payload'],
+      encryptedKey: json['encrypted_key'],
+      iv: json['iv'],
+    );
+  }
+
+  /// Convert to a JSON payload for persistence or transport
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'content': content,
+      'user_id': userId,
+      'username': username,
+      'room_id': roomId,
+      'message_type': _messageTypeToString(type),
+      'status': status.name,
+      'is_bot': isBot,
+      'timestamp': timestamp.toIso8601String(),
+      'avatar_url': avatarUrl,
+      'image_url': imageUrl,
+      'error_message': errorMessage,
+      'is_secure': isSecure,
+      'encrypted_payload': encryptedPayload,
+      'encrypted_key': encryptedKey,
+      'iv': iv,
+    };
   }
 
   /// Convert from AI response chunk
@@ -125,17 +207,39 @@ class ChatMessage extends Equatable {
   }
 
   static MessageType _parseMessageType(String type) {
-    switch (type) {
+    switch (type.toUpperCase()) {
       case 'IMAGE':
         return MessageType.image;
       case 'AI_RESPONSE':
+      case 'AI':
         return MessageType.ai;
       default:
         return MessageType.text;
     }
   }
 
-  @override
+  static String _messageTypeToString(MessageType type) {
+    switch (type) {
+      case MessageType.image:
+        return 'IMAGE';
+      case MessageType.ai:
+        return 'AI_RESPONSE';
+      case MessageType.text:
+        return 'TEXT';
+    }
+  }
+
+  static int? _parseInt(dynamic value) {
+    if (value == null) {
+      return null;
+    }
+    if (value is int) {
+      return value;
+    }
+    return int.tryParse(value.toString());
+  }
+
+    @override
   List<Object?> get props => [
         id,
         content,
@@ -149,42 +253,9 @@ class ChatMessage extends Equatable {
         avatarUrl,
         imageUrl,
         errorMessage,
+        isSecure,
+        encryptedPayload,
+        encryptedKey,
+        iv,
       ];
-}
-
-/// Room info model
-class ChatRoom extends Equatable {
-  final String id;
-  final String name;
-  final String? description;
-  final String roomType;
-  final List<Map<String, dynamic>> participants;
-  final DateTime createdAt;
-  final DateTime updatedAt;
-
-  const ChatRoom({
-    required this.id,
-    required this.name,
-    this.description,
-    required this.roomType,
-    this.participants = const [],
-    required this.createdAt,
-    required this.updatedAt,
-  });
-
-  factory ChatRoom.fromJson(Map<String, dynamic> json) {
-    return ChatRoom(
-      id: json['id'],
-      name: json['name'],
-      description: json['description'],
-      roomType: json['room_type'],
-      participants: List<Map<String, dynamic>>.from(json['participants'] ?? []),
-      createdAt: DateTime.parse(json['created_at']),
-      updatedAt: DateTime.parse(json['updated_at']),
-    );
-  }
-
-  @override
-  List<Object?> get props =>
-      [id, name, description, roomType, participants, createdAt, updatedAt];
 }

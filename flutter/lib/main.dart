@@ -47,6 +47,10 @@ class _MyAppState extends State<MyApp> {
   Future<void> _checkAuthentication() async {
     try {
       final restored = await _chatService.restoreSession();
+      if (restored) {
+        // Ensure E2EE keys are set up
+        await _chatService.setupE2EE();
+      }
       setState(() {
         _isAuthenticated = restored;
         _isChecking = false;
@@ -98,7 +102,9 @@ class _MyAppState extends State<MyApp> {
       ],
       child: MaterialApp(
         title: 'Chat App',
+        debugShowCheckedModeBanner: false,
         theme: ThemeData(
+    
           primarySwatch: Colors.blue,
           useMaterial3: true,
         ),

@@ -39,12 +39,27 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
   late ChatController _chatController;
   FriendshipStatus _friendshipStatus = FriendshipStatus.notFriends;
   bool _isLoading = false;
+  int? _currentUserId;
 
   @override
   void initState() {
     super.initState();
     _chatController = ChatController(apiService: ApiService());
+    _loadCurrentUserId();
     _checkFriendshipStatus();
+  }
+
+  Future<void> _loadCurrentUserId() async {
+    try {
+      final user = await ApiService().getCurrentUser();
+      if (mounted) {
+        setState(() {
+          _currentUserId = user.id;
+        });
+      }
+    } catch (e) {
+      print('Error loading current user: $e');
+    }
   }
 
   Future<void> _checkFriendshipStatus() async {
@@ -96,8 +111,10 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
             child: ChatScreen(
               roomId: response.roomId,
               roomName: response.roomName,
-              userId: 0, // Will be set from context in ChatScreen
+              userId: _currentUserId ?? 0,
               username: widget.username,
+              friendId: widget.userId,
+              isGroup: false,
             ),
           ),
         ),

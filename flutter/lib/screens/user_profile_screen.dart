@@ -18,6 +18,8 @@ class UserProfileScreen extends StatelessWidget {
       appBar: AppBar(
         title: Text('Profile'),
         elevation: 0,
+        backgroundColor: Theme.of(context).primaryColor,
+        foregroundColor: Colors.white,
         leading: IconButton(
           icon: Icon(Icons.arrow_back),
           onPressed: () => Navigator.pop(context),
@@ -30,13 +32,13 @@ class UserProfileScreen extends StatelessWidget {
             Container(
               width: double.infinity,
               decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [Colors.blue[400]!, Colors.blue[700]!],
+                color: Theme.of(context).primaryColor,
+                borderRadius: BorderRadius.only(
+                  bottomLeft: Radius.circular(24),
+                  bottomRight: Radius.circular(24),
                 ),
               ),
-              padding: EdgeInsets.symmetric(vertical: 32),
+              padding: EdgeInsets.only(bottom: 32, top: 16),
               child: Center(
                 child: Column(
                   children: [
@@ -125,36 +127,10 @@ class UserProfileScreen extends StatelessWidget {
                   ),
                   SizedBox(height: 16),
                   _buildInfoCard(
+                    context,
                     icon: Icons.email_outlined,
                     label: 'Email Address',
                     value: user.email,
-                  ),
-                  SizedBox(height: 12),
-                  _buildInfoCard(
-                    icon: Icons.person_outlined,
-                    label: 'First Name',
-                    value:
-                        user.firstName.isNotEmpty ? user.firstName : 'Not set',
-                  ),
-                  SizedBox(height: 12),
-                  _buildInfoCard(
-                    icon: Icons.person_outlined,
-                    label: 'Last Name',
-                    value: user.lastName.isNotEmpty ? user.lastName : 'Not set',
-                  ),
-                  SizedBox(height: 12),
-                  _buildInfoCard(
-                    icon: Icons.info_outlined,
-                    label: 'User ID',
-                    value: user.id.toString(),
-                  ),
-                  SizedBox(height: 12),
-                  _buildInfoCard(
-                    icon: Icons.access_time_outlined,
-                    label: 'Member Since',
-                    value: user.lastSeen != null
-                        ? _formatDate(user.lastSeen!)
-                        : 'Not available',
                   ),
                   SizedBox(height: 32),
                   // Logout Button
@@ -216,62 +192,48 @@ class UserProfileScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildInfoCard({
+  Widget _buildInfoCard(
+    BuildContext context, {
     required IconData icon,
     required String label,
     required String value,
     Color? valueColor,
   }) {
-    return Container(
-      padding: EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.grey[50],
+    final primaryColor = Theme.of(context).primaryColor;
+    return Card(
+      elevation: 0,
+      color: Theme.of(context).cardColor,
+      shape: RoundedRectangleBorder(
+        side: BorderSide(color: Colors.grey.withOpacity(0.2)),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey[200]!),
       ),
-      child: Row(
-        children: [
-          Container(
-            padding: EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: Colors.blue[100],
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Icon(icon, color: Colors.blue, size: 20),
+      child: ListTile(
+        leading: Container(
+          padding: EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: primaryColor.withOpacity(0.1),
+            borderRadius: BorderRadius.circular(8),
           ),
-          SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.grey[600],
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                SizedBox(height: 4),
-                Text(
-                  value,
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: valueColor,
-                  ),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-            ),
+          child: Icon(icon, color: primaryColor, size: 20),
+        ),
+        title: Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            color: Colors.grey[600],
+            fontWeight: FontWeight.w500,
           ),
-        ],
+        ),
+        subtitle: Text(
+          value,
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+            color: valueColor,
+          ),
+        ),
       ),
     );
   }
 
-  String _formatDate(DateTime date) {
-    return '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
-  }
 }

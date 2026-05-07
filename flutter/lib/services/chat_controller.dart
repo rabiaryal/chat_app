@@ -1,5 +1,6 @@
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'package:hive_flutter/hive_flutter.dart';
 import 'api_service.dart';
 import 'hive_token_storage.dart';
 
@@ -45,6 +46,8 @@ class ChatController {
   /// - Exception if user not found (404)
   /// - Exception if network error
   Future<ChatInitResponse> initializeChat({required int targetUserId}) async {
+    final cacheBox = await Hive.openBox<Map>('chat_rooms_cache');
+    
     try {
       final accessToken = tokenStorage.getAccessToken();
       if (accessToken == null) {
@@ -62,13 +65,17 @@ class ChatController {
         body: jsonEncode({
           'target_user_id': targetUserId,
         }),
-      );
+      ).timeout(const Duration(seconds: 5));
 
       if (response.statusCode == 200 || response.statusCode == 201) {
         final data = jsonDecode(response.body);
-        print(
-            '✓ Chat initialized: room_id=${data['room_id']}, created=${data['created']}');
-        return ChatInitResponse.fromJson(data);
+        final chatInitResponse = ChatInitResponse.fromJson(data);
+        
+        // Cache the successful response
+        await cacheBox.put(targetUserId.toString(), data);
+        
+        print('✓ Chat initialized: room_id=${data['room_id']}, created=${data['created']}');
+        return chatInitResponse;
       } else if (response.statusCode == 403) {
         final data = jsonDecode(response.body);
         throw FriendshipException(
@@ -82,6 +89,14 @@ class ChatController {
       }
     } catch (e) {
       print('✗ Chat initialization error: $e');
+      
+      // Fallback to cache if network error
+      final cachedData = cacheBox.get(targetUserId.toString());
+      if (cachedData != null) {
+        print('ℹ Using cached room info for user $targetUserId');
+        return ChatInitResponse.fromJson(Map<String, dynamic>.from(cachedData));
+      }
+      
       rethrow;
     }
   }
@@ -127,37 +142,31 @@ class ChatController {
     required int targetUserId,
   }) async {
     try {
-      final accessToken = tokenStorage.getAccessToken();
-      if (accessToken == null) {
-        throw Exception('No access token available');
-      }
+      final friends = await apiService.getFriends(limit: 100);
 
-      final url = Uri.parse('${apiService.baseUrl}/api/v1/friends/');
+      // Check if target user is in friends list
+      final isFriend = friends.any((friend) => friend.id == targetUserId);
 
-      final response = await http.get(
-        url,
-        headers: {
-          'Authorization': 'Bearer $accessToken',
-        },
-      );
-
-      if (response.statusCode == 200) {
-        final friends = jsonDecode(response.body) as List;
-
-        // Check if target user is in friends list
-        final isFriend = friends.any((friend) => friend['id'] == targetUserId);
-
-        if (isFriend) {
-          return FriendshipStatus.accepted;
-        } else {
-          // Default to not friends yet (could be pending, but we return not friends)
-          return FriendshipStatus.notFriends;
-        }
+      if (isFriend) {
+        return FriendshipStatus.accepted;
       } else {
-        throw Exception('Failed to fetch friends list: ${response.body}');
+        // Default to not friends yet (could be pending, but we return not friends)
+        return FriendshipStatus.notFriends;
       }
     } catch (e) {
       print('✗ Friendship status check error: $e');
+      
+      // Fallback: If we have a cached room for this user, they MUST be friends
+      try {
+        final cacheBox = await Hive.openBox<Map>('chat_rooms_cache');
+        if (cacheBox.containsKey(targetUserId.toString())) {
+          print('ℹ Using cached friendship status for user $targetUserId');
+          return FriendshipStatus.accepted;
+        }
+      } catch (cacheError) {
+        print('Error checking room cache: $cacheError');
+      }
+      
       return FriendshipStatus.notFriends; // Default to not friends on error
     }
   }

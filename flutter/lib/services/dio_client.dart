@@ -1,7 +1,6 @@
 /// Dio HTTP client with automatic token injection and refresh
 import 'package:dio/dio.dart';
 import 'hive_token_storage.dart';
-import 'dart:convert';
 import 'dart:async';
 
 class AuthInterceptor extends Interceptor {
@@ -10,7 +9,6 @@ class AuthInterceptor extends Interceptor {
 
   // Lock to prevent multiple token refresh requests
   bool _isRefreshing = false;
-  final List<void Function()> _refreshListeners = [];
 
   AuthInterceptor({
     required this.tokenStorage,
@@ -114,6 +112,7 @@ class AuthInterceptor extends Interceptor {
         baseUrl: baseUrl,
         connectTimeout: Duration(seconds: 10),
         receiveTimeout: Duration(seconds: 10),
+        validateStatus: (status) => status != null && status < 500,
       ));
 
       final response = await dio.post(
@@ -155,6 +154,7 @@ class AuthInterceptor extends Interceptor {
       baseUrl: baseUrl,
       connectTimeout: Duration(seconds: 10),
       receiveTimeout: Duration(seconds: 10),
+      validateStatus: (status) => status != null && status < 500,
     ));
 
     // Add new token to retry request
@@ -190,6 +190,7 @@ class DioClient {
         baseUrl: baseUrl,
         connectTimeout: Duration(seconds: 10),
         receiveTimeout: Duration(seconds: 10),
+        validateStatus: (status) => status != null && status < 500,
         headers: {
           'Content-Type': 'application/json',
         },

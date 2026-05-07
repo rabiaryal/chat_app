@@ -65,16 +65,22 @@ class ChatBubble extends StatelessWidget {
                   ),
                   decoration: BoxDecoration(
                     color: _getBubbleColor(context),
-                    borderRadius: BorderRadius.circular(16),
+                    borderRadius: BorderRadius.only(
+                      topLeft: Radius.circular(16),
+                      topRight: Radius.circular(16),
+                      bottomLeft: Radius.circular(isCurrentUser ? 16 : 4),
+                      bottomRight: Radius.circular(isCurrentUser ? 4 : 16),
+                    ),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withOpacity(0.1),
-                        blurRadius: 4,
-                        offset: Offset(0, 2),
+                        color: Colors.black.withOpacity(0.05),
+                        blurRadius: 1,
+                        spreadRadius: 1,
+                        offset: Offset(0, 1),
                       ),
                     ],
                   ),
-                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  padding: EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -130,24 +136,23 @@ class ChatBubble extends StatelessWidget {
   }
 
   Color _getBubbleColor(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     if (message.isBot) {
-      return Colors.grey[200]!;
+      return isDark ? Colors.grey[800]! : Colors.white;
     }
-    return isCurrentUser ? Theme.of(context).primaryColor : Colors.grey[300]!;
+    return isCurrentUser 
+        ? (isDark ? Color(0xFF005C4B) : Color(0xFFE1FFC7)) 
+        : (isDark ? Color(0xFF202C33) : Colors.white);
   }
 
   Color _getTextColor(BuildContext context) {
-    if (message.isBot) {
-      return Colors.black87;
-    }
-    return isCurrentUser ? Colors.white : Colors.black87;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return isDark ? Colors.white : Colors.black87;
   }
 
   Color _getTimestampColor(BuildContext context, bool isCurrentUser) {
-    if (message.isBot) {
-      return Colors.grey[600]!;
-    }
-    return isCurrentUser ? Colors.white70 : Colors.grey[600]!;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return isDark ? Colors.white54 : Colors.grey[600]!;
   }
 
   Widget _buildStatusIcon(BuildContext context) {
@@ -165,9 +170,15 @@ class ChatBubble extends StatelessWidget {
         );
       case MessageStatus.delivered:
         return Icon(
+          Icons.done,
+          size: 14,
+          color: Colors.grey[400],
+        );
+      case MessageStatus.read:
+        return Icon(
           Icons.done_all,
           size: 14,
-          color: Colors.white70,
+          color: Colors.blue[400],
         );
       case MessageStatus.streaming:
         return SizedBox(

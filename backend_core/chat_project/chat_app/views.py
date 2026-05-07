@@ -9,10 +9,11 @@ from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.views import APIView
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from rest_framework_simplejwt.tokens import RefreshToken
+from drf_spectacular.utils import extend_schema
 from django.contrib.auth import get_user_model
 from django.contrib.auth.hashers import make_password
 from django.db import models
-from .models import ChatRoom, Message, Friendship
+from .models import ChatRoom, Message, Friendship, UserPublicKey
 from .serializers import (
     CustomTokenObtainPairSerializer,
     UserSerializer,
@@ -21,7 +22,12 @@ from .serializers import (
     ChatRoomDetailSerializer,
     MessageSerializer,
     FriendshipSerializer,
-    FriendshipListSerializer
+    FriendshipListSerializer,
+    LoginSerializer,
+    LogoutSerializer,
+    ChangePasswordSerializer,
+    TokenResponseSerializer,
+    UserPublicKeySerializer,
 )
 
 User = get_user_model()
@@ -41,8 +47,14 @@ class RegisterView(APIView):
     POST: {username, email, password, password_confirm, first_name?, last_name?}
     Returns: {user, access, refresh}
     """
+    serializer_class = UserRegistrationSerializer
     permission_classes = [AllowAny]
 
+    @extend_schema(
+        request=UserRegistrationSerializer,
+        responses={201: TokenResponseSerializer},
+        description='Register a new user account'
+    )
     def post(self, request):
         serializer = UserRegistrationSerializer(data=request.data)
         if serializer.is_valid():
@@ -75,8 +87,14 @@ class LoginView(APIView):
     POST: {username, password}
     Returns: {user, access, refresh}
     """
+    serializer_class = LoginSerializer
     permission_classes = [AllowAny]
 
+    @extend_schema(
+        request=LoginSerializer,
+        responses={200: TokenResponseSerializer},
+        description='Login with username and password to get tokens'
+    )
     def post(self, request):
         username = request.data.get('username')
         password = request.data.get('password')
@@ -125,32 +143,43 @@ class LoginView(APIView):
 class LogoutView(APIView):
     """
     Logout and invalidate refresh token.
-    POST: {refresh}
+    POST: {refresh} (optional - if not provided, just clears the token)
     Returns: {message}
     """
+    serializer_class = LogoutSerializer
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        request=LogoutSerializer,
+        responses={200: TokenResponseSerializer},
+        description='Logout and blacklist refresh token'
+    )
     def post(self, request):
         try:
             refresh_token = request.data.get('refresh')
             
-            if not refresh_token:
-                return Response(
-                    {'error': 'Refresh token is required'},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-            
-            token = RefreshToken(refresh_token)
-            token.blacklist()
+            # Try to blacklist the token if provided
+            if refresh_token:
+                try:
+                    token = RefreshToken(refresh_token)
+                    token.blacklist()
+                    print(f'✓ Refresh token blacklisted for user {request.user.username}')
+                except Exception as token_error:
+                    # Token might be expired or invalid, but that's ok
+                    print(f'⚠ Token blacklist failed (token may be expired): {token_error}')
+            else:
+                print(f'⚠ No refresh token provided, but logout allowed (user: {request.user.username})')
             
             return Response(
                 {'message': 'Logout successful'},
                 status=status.HTTP_200_OK
             )
         except Exception as e:
+            # Even if something fails, we allow logout
+            print(f'✗ Logout error: {e}')
             return Response(
-                {'error': str(e)},
-                status=status.HTTP_400_BAD_REQUEST
+                {'message': 'Logout successful (partial)'},
+                status=status.HTTP_200_OK
             )
 
 
@@ -160,8 +189,14 @@ class ChangePasswordView(APIView):
     POST: {old_password, new_password, new_password_confirm}
     Returns: {message}
     """
+    serializer_class = ChangePasswordSerializer
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        request=ChangePasswordSerializer,
+        responses={200: TokenResponseSerializer},
+        description='Change the current user password'
+    )
     def post(self, request):
         user = request.user
         old_password = request.data.get('old_password')
@@ -269,6 +304,63 @@ class UserDeleteView(APIView):
                 {'error': str(e)},
                 status=status.HTTP_400_BAD_REQUEST
             )
+
+
+class SuggestedFriendsView(APIView):
+    """
+    Get suggested friends (users who are not friends and have no pending requests).
+    Supports pagination with ?page=1&limit=5
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        try:
+            page = int(request.query_params.get('page', 1))
+            limit = int(request.query_params.get('limit', 5))
+        except ValueError:
+            page = 1
+            limit = 5
+            
+        page = max(1, page)
+        limit = max(1, min(limit, 50))
+        offset = (page - 1) * limit
+
+        # Get IDs of users who are already friends or have pending requests
+        from django.db.models import Q
+        friendships = Friendship.objects.filter(
+            Q(from_user=request.user) | Q(to_user=request.user)
+        )
+        
+        exclude_ids = set([request.user.id])
+        for f in friendships:
+            exclude_ids.add(f.from_user_id)
+            exclude_ids.add(f.to_user_id)
+            
+        # Get random users not in exclude list
+        # We slice from offset to offset+limit
+        users = User.objects.exclude(id__in=exclude_ids).order_by('?')[offset:offset+limit]
+        
+        results = [
+            {
+                'id': user.id,
+                'username': user.username,
+                'email': user.email,
+                'first_name': user.first_name,
+                'last_name': user.last_name,
+                'is_online': getattr(user, 'is_online', False),
+            }
+            for user in users
+        ]
+        
+        return Response(
+            {
+                'results': results, 
+                'count': len(results),
+                'page': page,
+                'limit': limit
+            },
+            status=status.HTTP_200_OK
+        )
 
 
 class UserSearchView(APIView):
@@ -417,6 +509,65 @@ class RoomsListView(APIView):
             )
 
 
+class GroupCreateView(APIView):
+    """
+    Create a new group chat.
+    POST: { "name": "...", "description": "...", "participant_ids": [1, 2] }
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        name = request.data.get('name')
+        description = request.data.get('description', '')
+        participant_ids = request.data.get('participant_ids', [])
+
+        if not name:
+            return Response(
+                {'error': 'Group name is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            import uuid
+            room = ChatRoom.objects.create(
+                id=str(uuid.uuid4()),
+                name=name,
+                description=description,
+                room_type='GROUP',
+                creator=request.user,
+            )
+
+            # Add creator as participant
+            room.participants.add(request.user)
+
+            # Add other participants
+            if participant_ids:
+                participants = User.objects.filter(id__in=participant_ids)
+                room.participants.add(*participants)
+
+            return Response(
+                {
+                    'message': 'Group created successfully',
+                    'room': {
+                        'id': room.id,
+                        'name': room.name,
+                        'description': room.description,
+                        'room_type': room.room_type,
+                        'creator_id': room.creator.id,
+                        'participants_count': room.participants.count(),
+                        'created_at': room.created_at.isoformat(),
+                        'updated_at': room.updated_at.isoformat(),
+                    }
+                },
+                status=status.HTTP_201_CREATED
+            )
+        except Exception as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+
 class RoomDetailView(APIView):
     """
     Get room details and member list, or delete a room.
@@ -472,6 +623,36 @@ class RoomDetailView(APIView):
                 {'error': 'Room not found'},
                 status=status.HTTP_404_NOT_FOUND
             )
+
+
+class RoomMessagesView(APIView):
+    """Return recent messages for a room."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, room_id):
+        try:
+            room = ChatRoom.objects.get(id=room_id)
+        except ChatRoom.DoesNotExist:
+            return Response({'error': 'Room not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        if not room.participants.filter(id=request.user.id).exists():
+            return Response({'error': 'You are not a member of this room'}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            limit = int(request.query_params.get('limit', 20))
+        except (TypeError, ValueError):
+            limit = 20
+
+        limit = max(1, min(limit, 100))
+
+        messages = (
+            Message.objects.filter(room=room)
+            .select_related('sender', 'room')
+            .order_by('-created_at')[:limit]
+        )
+
+        serializer = MessageSerializer(messages, many=True)
+        return Response(list(reversed(serializer.data)), status=status.HTTP_200_OK)
 
     def delete(self, request, room_id):
         """
@@ -770,7 +951,7 @@ class GetOrCreateRoomView(APIView):
     2. Django checks: Does room exist in database?
     3. If yes: Return room ID
     4. If no: Create room, return new ID
-    5. Flutter connects: WebSocket to FastAPI with room ID
+    5. Flutter connects: WebSocket to Django with room ID
     """
     permission_classes = [IsAuthenticated]
 
@@ -949,8 +1130,8 @@ class FriendshipAcceptView(APIView):
     """
     permission_classes = [IsAuthenticated]
 
-    def post(self, request):
-        friendship_id = request.data.get('friendship_id')
+    def post(self, request, friendship_id=None):
+        friendship_id = friendship_id or request.data.get('friendship_id')
         
         if not friendship_id:
             return Response(
@@ -988,6 +1169,52 @@ class FriendshipAcceptView(APIView):
         )
 
 
+class FriendshipRejectView(APIView):
+    """
+    Reject a friend request.
+    POST: {friendship_id}
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, friendship_id=None):
+        friendship_id = friendship_id or request.data.get('friendship_id')
+
+        if not friendship_id:
+            return Response(
+                {'error': 'friendship_id is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            friendship = Friendship.objects.get(
+                id=friendship_id,
+                to_user=request.user
+            )
+        except Friendship.DoesNotExist:
+            return Response(
+                {'error': 'Friendship request not found or you are not the recipient'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        if friendship.status != 'PENDING':
+            return Response(
+                {'error': f'Friendship request is already {friendship.status.lower()}'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        friendship.status = 'REJECTED'
+        friendship.save()
+
+        serializer = FriendshipSerializer(friendship)
+        return Response(
+            {
+                'message': 'Friend request rejected',
+                'friendship': serializer.data
+            },
+            status=status.HTTP_200_OK
+        )
+
+
 class FriendshipListView(APIView):
     """
     List all accepted friendships for the current user.
@@ -1002,29 +1229,163 @@ class FriendshipListView(APIView):
         sent = Friendship.objects.filter(
             from_user=current_user,
             status='ACCEPTED'
-        )
+        ).select_related('to_user')
         
         # Get friends sent to current user (accepted)
         received = Friendship.objects.filter(
             to_user=current_user,
             status='ACCEPTED'
-        )
+        ).select_related('from_user')
         
         # Combine and get unique users
         friends_set = set()
-        friends_data = []
+        friends_list = []
         
         for friendship in sent:
             if friendship.to_user.id not in friends_set:
                 friends_set.add(friendship.to_user.id)
-                friends_data.append(UserSerializer(friendship.to_user).data)
+                friends_list.append(friendship.to_user)
         
         for friendship in received:
             if friendship.from_user.id not in friends_set:
                 friends_set.add(friendship.from_user.id)
-                friends_data.append(UserSerializer(friendship.from_user).data)
+                friends_list.append(friendship.from_user)
+                
+        # Sort users by is_online (True first), then by last_seen (most recent first)
+        import datetime
+        from django.utils import timezone
         
-        return Response(friends_data, status=status.HTTP_200_OK)
+        def sort_key(user):
+            is_online_sort = 0 if getattr(user, 'is_online', False) else 1
+            last_seen = getattr(user, 'last_seen', None)
+            if last_seen is None:
+                last_seen = timezone.make_aware(datetime.datetime(1970, 1, 1))
+            return (is_online_sort, -last_seen.timestamp())
+
+        friends_list.sort(key=sort_key)
+
+        # Pagination
+        try:
+            page = int(request.query_params.get('page', 1))
+            limit = int(request.query_params.get('limit', 10))
+        except ValueError:
+            page = 1
+            limit = 10
+            
+        page = max(1, page)
+        limit = max(1, min(limit, 50))
+        offset = (page - 1) * limit
+        
+        paginated_friends = friends_list[offset:offset+limit]
+        friends_data = [UserSerializer(user).data for user in paginated_friends]
+        
+        return Response(
+            {
+                'results': friends_data,
+                'count': len(friends_list),
+                'page': page,
+                'limit': limit
+            }, 
+            status=status.HTTP_200_OK
+        )
+
+
+class IncomingFriendshipRequestsView(APIView):
+    """List incoming pending friendship requests for the current user."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        incoming = Friendship.objects.filter(
+            to_user=request.user,
+            status='PENDING'
+        ).select_related('from_user', 'to_user')
+
+        data = [
+            {
+                'id': f.id,
+                'from_user_id': f.from_user_id,
+                'from_username': f.from_user.username,
+                'to_user_id': f.to_user_id,
+                'to_username': f.to_user.username,
+                'status': f.status,
+                'created_at': f.created_at,
+                'responded_at': f.updated_at if f.status != 'PENDING' else None,
+            }
+            for f in incoming
+        ]
+        return Response(data, status=status.HTTP_200_OK)
+
+
+class OutgoingFriendshipRequestsView(APIView):
+    """List outgoing pending friendship requests for the current user."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        outgoing = Friendship.objects.filter(
+            from_user=request.user,
+            status='PENDING'
+        ).select_related('from_user', 'to_user')
+
+        data = [
+            {
+                'id': f.id,
+                'from_user_id': f.from_user_id,
+                'from_username': f.from_user.username,
+                'to_user_id': f.to_user_id,
+                'to_username': f.to_user.username,
+                'status': f.status,
+                'created_at': f.created_at,
+                'responded_at': f.updated_at if f.status != 'PENDING' else None,
+            }
+            for f in outgoing
+        ]
+        return Response(data, status=status.HTTP_200_OK)
+
+
+class HealthCheckView(APIView):
+    """Health check endpoint for Django service."""
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        return Response(
+            {
+                'status': 'healthy',
+                'service': 'django',
+                'version': '1.0.0',
+            },
+            status=status.HTTP_200_OK
+        )
+
+
+class RoomInfoView(APIView):
+    """Return room metadata for client diagnostics."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, room_id):
+        try:
+            room = ChatRoom.objects.get(id=room_id)
+        except ChatRoom.DoesNotExist:
+            return Response({'error': 'Room not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        if not room.participants.filter(id=request.user.id).exists():
+            return Response({'error': 'You are not a member of this room'}, status=status.HTTP_403_FORBIDDEN)
+
+        users = [
+            {
+                'user_id': u.id,
+                'username': u.username,
+            }
+            for u in room.participants.all()
+        ]
+
+        return Response(
+            {
+                'room_id': room.id,
+                'active_users': users,
+                'user_count': len(users),
+            },
+            status=status.HTTP_200_OK
+        )
 
 
 class GetOrInitChatView(APIView):
@@ -1127,3 +1488,102 @@ class GetOrInitChatView(APIView):
             },
             status=status.HTTP_201_CREATED
         )
+
+
+class FriendshipDeleteView(APIView):
+    """
+    Unfriend a user.
+    DELETE: /api/v1/friends/<friend_id>/
+    """
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, friend_id):
+        current_user = request.user
+        
+        # Check if target user exists
+        try:
+            friend = User.objects.get(id=friend_id)
+        except User.DoesNotExist:
+            return Response(
+                {'error': 'User not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        # Find friendship in either direction
+        friendship = Friendship.objects.filter(
+            (models.Q(from_user=current_user, to_user=friend) |
+             models.Q(from_user=friend, to_user=current_user))
+        ).first()
+        
+        if not friendship:
+            return Response(
+                {'error': 'Friendship not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        # Delete friendship
+        friendship.delete()
+        
+        return Response(
+            {'message': f'Successfully unfriended {friend.username}'},
+            status=status.HTTP_204_NO_CONTENT
+        )
+
+
+class PublicKeyUploadView(APIView):
+    """
+    Upload or update the user's RSA Public Key.
+    POST: { "public_key": "...", "device_id": "..." }
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        public_key_text = request.data.get('public_key')
+        device_id = request.data.get('device_id')
+
+        if not public_key_text:
+            return Response(
+                {'error': 'public_key is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        public_key_obj, created = UserPublicKey.objects.update_or_create(
+            user=request.user,
+            defaults={
+                'public_key': public_key_text,
+                'device_id': device_id
+            }
+        )
+
+        return Response(
+            {
+                'message': 'Public key uploaded successfully',
+                'created': created
+            },
+            status=status.HTTP_200_OK if not created else status.HTTP_201_CREATED
+        )
+
+
+class PublicKeyRetrieveView(APIView):
+    """
+    Retrieve another user's RSA Public Key.
+    GET: /api/keys/<user_id>/
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, user_id):
+        try:
+            public_key_obj = UserPublicKey.objects.get(user_id=user_id)
+            return Response(
+                {
+                    'user_id': user_id,
+                    'public_key': public_key_obj.public_key,
+                    'device_id': public_key_obj.device_id,
+                },
+                status=status.HTTP_200_OK
+            )
+        except UserPublicKey.DoesNotExist:
+            return Response(
+                {'error': 'Public key not found for this user'},
+                status=status.HTTP_404_NOT_FOUND
+            )

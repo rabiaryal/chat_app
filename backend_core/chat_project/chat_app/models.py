@@ -130,3 +130,17 @@ class AIResponse(models.Model):
 
     def __str__(self):
         return f"AI Response to message {self.message.id}"
+
+
+class UserPublicKey(models.Model):
+    """
+    Model for storing user's public keys for E2EE.
+    """
+    user = models.OneToOneField(CustomUser, on_delete=models.CASCADE, related_name='public_key')
+    public_key = models.TextField()
+    device_id = models.CharField(max_length=255, blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Public key for {self.user.username}"

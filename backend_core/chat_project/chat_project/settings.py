@@ -26,6 +26,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'channels',
     'rest_framework',
     'rest_framework_simplejwt.token_blacklist',
     'corsheaders',
@@ -45,6 +46,7 @@ MIDDLEWARE = [
 ]
 
 ROOT_URLCONF = 'chat_project.urls'
+ASGI_APPLICATION = 'chat_project.asgi.application'
 
 TEMPLATES = [
     {
@@ -122,9 +124,24 @@ REST_FRAMEWORK = {
 
 SPECTACULAR_SETTINGS = {
     'TITLE': 'Chat App API',
-    'DESCRIPTION': 'API for the Chat App',
+    'DESCRIPTION': 'API for the Chat App with JWT Authentication',
     'VERSION': '1.0.0',
     'SERVE_INCLUDE_SCHEMA': False,
+    'SECURITY': [
+        {
+            'Bearer': [],
+        }
+    ],
+    'COMPONENTS': {
+        'securitySchemes': {
+            'Bearer': {
+                'type': 'http',
+                'scheme': 'bearer',
+                'bearerFormat': 'JWT',
+                'description': 'JWT access token. Get one from POST /api/v1/auth/login/ with username and password.',
+            }
+        }
+    },
 }
 
 # Simple JWT configuration
@@ -160,17 +177,13 @@ SIMPLE_JWT = {
 CORS_ALLOWED_ORIGINS = [
     'http://localhost:3000',      # Local development web
     'http://localhost:8000',      # Django dev server
-    'http://localhost:8081',      # FastAPI dev server  
     'http://localhost:8080',      # Mobile emulator
     'http://127.0.0.1:3000',
     'http://127.0.0.1:8000',
-    'http://127.0.0.1:8081',
     'http://127.0.0.1:8080',
     'http://192.168.1.65:8000',   # Your machine IP - Django
-    'http://192.168.1.65:8081',   # Your machine IP - FastAPI
     'http://192.168.1.65:3000',   # Your machine IP - Web
     'http://django:8000',         # Docker service name - Inter-service
-    'http://fastapi:8081',        # Docker service name - Inter-service
 ]
 
 # Parse from environment if provided
@@ -181,6 +194,16 @@ if cors_env:
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']
 CORS_ALLOW_HEADERS = ['Accept', 'Accept-Language', 'Content-Type', 'Authorization', 'Origin']
+
+# Channels configuration
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels_redis.core.RedisChannelLayer',
+        'CONFIG': {
+            'hosts': [config('REDIS_URL', default='redis://localhost:6379/0')],
+        },
+    },
+}
 
 # Custom User Model
 AUTH_USER_MODEL = 'chat_app.CustomUser'

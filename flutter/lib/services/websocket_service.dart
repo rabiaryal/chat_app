@@ -1,4 +1,4 @@
-/// WebSocket Service for real-time chat with FastAPI
+/// WebSocket Service for real-time chat with Django Channels
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'dart:convert';
 import 'dart:async';
@@ -43,7 +43,7 @@ class WebSocketService {
   late StreamController<Message> _messageController;
   late String _roomId;
 
-  WebSocketService({this.baseUrl = 'ws://localhost:8081'}) {
+  WebSocketService({this.baseUrl = 'ws://localhost:8000'}) {
     _messageController = StreamController<Message>.broadcast();
     _channel = null;
   }
@@ -53,7 +53,7 @@ class WebSocketService {
     try {
       _roomId = roomId;
 
-      final wsUrl = Uri.parse('$baseUrl/ws/chat/$roomId?token=$token');
+      final wsUrl = Uri.parse('$baseUrl/ws/chat/$roomId/?token=$token');
       _channel = WebSocketChannel.connect(wsUrl);
 
       // Listen to incoming messages

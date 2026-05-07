@@ -2,6 +2,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/chat_provider.dart';
+import '../providers/friend_provider.dart';
+import '../services/api_service.dart';
+import '../models/chat_message.dart';
+import '../models/chat_room.dart';
 import '../widgets/chat_bubble.dart';
 
 class ChatScreen extends StatefulWidget {
@@ -9,6 +13,8 @@ class ChatScreen extends StatefulWidget {
   final String roomName;
   final int userId;
   final String username;
+  final int friendId;
+  final bool isGroup;
 
   const ChatScreen({
     Key? key,
@@ -16,6 +22,8 @@ class ChatScreen extends StatefulWidget {
     required this.roomName,
     required this.userId,
     required this.username,
+    required this.friendId,
+    this.isGroup = false,
   }) : super(key: key);
 
   @override
@@ -27,6 +35,7 @@ class _ChatScreenState extends State<ChatScreen> {
   late TextEditingController _messageController;
   bool _shouldAutoScroll = true;
   double _lastScrollPosition = 0;
+  int _previousMessageCount = 0;
 
   @override
   void initState() {
@@ -56,21 +65,17 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _onScroll() {
+    if (!_scrollController.hasClients) return;
+    
     final currentPosition = _scrollController.position.pixels;
     final maxScroll = _scrollController.position.maxScrollExtent;
 
-    // If scrolling up (lower pixel value), disable auto-scroll
-    if (currentPosition < _lastScrollPosition) {
-      setState(() {
-        _shouldAutoScroll = false;
-      });
+    if (currentPosition < _lastScrollPosition && currentPosition < maxScroll - 20) {
+      _shouldAutoScroll = false;
     }
 
-    // If near the bottom, re-enable auto-scroll
-    if (currentPosition >= maxScroll - 100) {
-      setState(() {
-        _shouldAutoScroll = true;
-      });
+    if (currentPosition >= maxScroll - 20) {
+      _shouldAutoScroll = true;
     }
 
     _lastScrollPosition = currentPosition;
@@ -99,31 +104,169 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
+  void _showActionConfirmation(BuildContext context) {
+    final title = widget.isGroup ? 'Leave ${widget.roomName}?' : 'Unfriend ${widget.username}?';
+    final content = widget.isGroup 
+        ? 'Are you sure you want to leave this group? You will no longer receive messages from this conversation.'
+        : 'Are you sure you want to remove ${widget.username} from your friends? This will also end your ability to chat.';
+    final actionText = widget.isGroup ? 'Leave' : 'Unfriend';
+
+    showDialog(
+      context: context,
+      builder: (BuildContext dialogContext) {
+        return AlertDialog(
+          title: Text(title),
+          content: Text(content),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () async {
+                Navigator.pop(dialogContext); // Close dialog
+                
+                bool success = false;
+                if (widget.isGroup) {
+                  try {
+                    await context.read<ApiService>().leaveRoom(widget.roomId);
+                    success = true;
+                  } catch (e) {
+                    print('Error leaving group: $e');
+                  }
+                } else {
+                  success = await Provider.of<FriendProvider>(context, listen: false)
+                      .removeFriend(widget.friendId);
+                }
+                
+                if (success && mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text(widget.isGroup ? 'Left group' : 'Unfriended ${widget.username}')),
+                  );
+                  Navigator.pop(context); // Exit chat screen
+                } else if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Action failed. Please try again.')),
+                  );
+                }
+              },
+              child: Text(actionText, style: const TextStyle(color: Colors.red)),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        titleSpacing: 0,
+        title: Row(
           children: [
-            Text(widget.roomName),
-            Consumer<ChatProvider>(
-              builder: (context, chatProvider, _) {
-                return Text(
-                  chatProvider.isConnected ? 'Online' : 'Offline',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: chatProvider.isConnected
-                            ? Colors.green
-                            : Colors.red,
-                        fontSize: 12,
-                      ),
-                );
-              },
+            CircleAvatar(
+              radius: 18,
+              backgroundColor: Colors.blueGrey[100],
+              child: widget.isGroup
+                  ? const Icon(Icons.groups, color: Colors.blueGrey, size: 20)
+                  : Text(
+                      widget.roomName.isNotEmpty ? widget.roomName[0].toUpperCase() : 'U',
+                      style: TextStyle(color: Colors.blueGrey[800], fontSize: 16),
+                    ),
+            ),
+            SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    widget.roomName.split('&').last.trim(),
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                  ),
+                  Consumer<ChatProvider>(
+                    builder: (context, chatProvider, _) {
+                      if (widget.isGroup) {
+                        return const Text(
+                          'Group Chat',
+                          style: TextStyle(color: Colors.white70, fontSize: 12),
+                        );
+                      }
+                      return Text(
+                        chatProvider.isConnected ? 'Online' : 'Offline',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: chatProvider.isConnected
+                                  ? Colors.white70
+                                  : Colors.red[200],
+                              fontSize: 12,
+                            ),
+                      );
+                    },
+                  ),
+                ],
+              ),
             ),
           ],
         ),
-        elevation: 0,
+        backgroundColor: Theme.of(context).primaryColor,
+        foregroundColor: Colors.white,
+        elevation: 1,
+        actions: [
+          IconButton(
+            icon: Icon(Icons.videocam),
+            onPressed: () {},
+          ),
+          IconButton(
+            icon: Icon(Icons.call),
+            onPressed: () {},
+          ),
+          PopupMenuButton<String>(
+            onSelected: (value) {
+              if (value == 'unfriend') {
+                _showActionConfirmation(context);
+              } else if (value == 'media') {
+                // Placeholder for media
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Media option coming soon!')),
+                );
+              }
+            },
+            itemBuilder: (BuildContext context) {
+              return [
+                PopupMenuItem(
+                  value: 'media',
+                  child: Row(
+                    children: [
+                      Icon(Icons.perm_media, color: Colors.black54),
+                      SizedBox(width: 8),
+                      Text('Media'),
+                    ],
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'unfriend',
+                  child: Row(
+                    children: [
+                      Icon(
+                        widget.isGroup ? Icons.exit_to_app : Icons.person_remove,
+                        color: Colors.red,
+                      ),
+                      SizedBox(width: 8),
+                      Text(
+                        widget.isGroup ? 'Leave Group' : 'Unfriend',
+                        style: const TextStyle(color: Colors.red),
+                      ),
+                    ],
+                  ),
+                ),
+              ];
+            },
+          ),
+        ],
       ),
+      backgroundColor: Theme.of(context).brightness == Brightness.dark 
+          ? Color(0xFF1E1E1E) 
+          : Color(0xFFE5DDD5), // Standard chat background
       body: Column(
         children: [
           // Connection status bar
@@ -141,11 +284,15 @@ class _ChatScreenState extends State<ChatScreen> {
           Expanded(
             child: Consumer<ChatProvider>(
               builder: (context, chatProvider, _) {
-                WidgetsBinding.instance.addPostFrameCallback((_) {
-                  if (chatProvider.messages.isNotEmpty) {
-                    _scrollToBottom();
-                  }
-                });
+                final currentMessageCount = chatProvider.messages.length;
+                if (currentMessageCount > _previousMessageCount) {
+                  _previousMessageCount = currentMessageCount;
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (_shouldAutoScroll) {
+                      _scrollToBottom();
+                    }
+                  });
+                }
 
                 if (chatProvider.isLoading) {
                   return Center(
@@ -192,78 +339,79 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
           // Message input bar
           Container(
-            decoration: BoxDecoration(
-              color: Theme.of(context).scaffoldBackgroundColor,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.1),
-                  blurRadius: 8,
-                  offset: Offset(0, -2),
-                ),
-              ],
-            ),
-            padding: EdgeInsets.all(16),
+            color: Colors.transparent,
+            padding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
             child: SafeArea(
               child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Expanded(
-                    child: TextField(
-                      controller: _messageController,
-                      decoration: InputDecoration(
-                        hintText: 'Type a message... (start with @bot for AI)',
-                        hintStyle: TextStyle(color: Colors.grey[500]),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(24),
-                          borderSide: BorderSide(color: Colors.grey[300]!),
-                        ),
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(24),
-                          borderSide: BorderSide(color: Colors.grey[300]!),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(24),
-                          borderSide:
-                              BorderSide(color: Theme.of(context).primaryColor),
-                        ),
-                        contentPadding:
-                            EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                        suffixIcon: _messageController.text.isNotEmpty
-                            ? Material(
-                                color: Colors.transparent,
-                                child: InkWell(
-                                  onTap: _messageController.clear,
-                                  child: Icon(
-                                    Icons.close,
-                                    size: 20,
-                                    color: Colors.grey[500],
-                                  ),
-                                ),
-                              )
-                            : null,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).cardColor,
+                        borderRadius: BorderRadius.circular(24),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.05),
+                            blurRadius: 1,
+                            offset: Offset(0, 1),
+                          )
+                        ],
                       ),
-                      onChanged: (value) {
-                        if (value.length == 1) {
-                          context.read<ChatProvider>().onUserTyping();
-                        }
-                        setState(() {});
-                      },
-                      maxLines: null,
-                      textInputAction: TextInputAction.newline,
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          IconButton(
+                            icon: Icon(Icons.emoji_emotions_outlined, color: Colors.grey[600]),
+                            onPressed: () {},
+                          ),
+                          Expanded(
+                            child: TextField(
+                              controller: _messageController,
+                              keyboardType: TextInputType.multiline,
+                              maxLines: 5,
+                              minLines: 1,
+                              decoration: InputDecoration(
+                                hintText: 'Message',
+                                hintStyle: TextStyle(color: Colors.grey[500]),
+                                border: InputBorder.none,
+                                contentPadding: EdgeInsets.symmetric(horizontal: 4, vertical: 12),
+                              ),
+                              onChanged: (value) {
+                                if (value.length == 1) {
+                                  context.read<ChatProvider>().onUserTyping();
+                                }
+                                setState(() {});
+                              },
+                            ),
+                          ),
+                          if (_messageController.text.isEmpty)
+                            IconButton(
+                              icon: Icon(Icons.attach_file, color: Colors.grey[600]),
+                              onPressed: () {},
+                            ),
+                          if (_messageController.text.isEmpty)
+                            IconButton(
+                              icon: Icon(Icons.camera_alt, color: Colors.grey[600]),
+                              onPressed: () {},
+                            ),
+                        ],
+                      ),
                     ),
                   ),
                   SizedBox(width: 8),
-                  FloatingActionButton(
-                    onPressed:
-                        _messageController.text.isEmpty ? null : _sendMessage,
-                    elevation: 0,
-                    backgroundColor: _messageController.text.isEmpty
-                        ? Colors.grey[300]
-                        : Theme.of(context).primaryColor,
-                    child: Icon(
-                      Icons.send,
-                      color: _messageController.text.isEmpty
-                          ? Colors.grey
-                          : Colors.white,
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 2),
+                    child: CircleAvatar(
+                      radius: 24,
+                      backgroundColor: Theme.of(context).primaryColor,
+                      child: IconButton(
+                        icon: Icon(
+                          _messageController.text.isEmpty ? Icons.mic : Icons.send,
+                          color: Colors.white,
+                        ),
+                        onPressed: _messageController.text.isEmpty ? null : _sendMessage,
+                      ),
                     ),
                   ),
                 ],

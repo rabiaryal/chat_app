@@ -1,11 +1,11 @@
 /// API Service using Dio with automatic token management
 import 'package:dio/dio.dart';
-import 'dart:convert';
 import 'hive_token_storage.dart';
 import 'dio_client.dart';
 import 'token_manager.dart';
 import '../models/user.dart';
 import '../models/chat_room.dart';
+import '../models/chat_message.dart';
 import '../models/friend.dart';
 
 class ApiService {
@@ -105,18 +105,26 @@ class ApiService {
   Future<void> logout() async {
     try {
       final refreshToken = tokenStorage.getRefreshToken();
-      if (refreshToken != null) {
-        try {
+
+      try {
+        if (refreshToken != null) {
+          print('📤 Sending logout request with refresh token...');
           await dio.post(
             '/api/v1/auth/logout/',
             data: {'refresh': refreshToken},
           );
-        } catch (e) {
-          print('⚠ Logout API call failed, but clearing tokens anyway');
+          print('✓ Logout API call successful');
+        } else {
+          print('⚠ No refresh token available, logging out locally');
         }
+      } catch (e) {
+        print('⚠ Logout API call failed, but clearing tokens anyway: $e');
+        // Continue with local logout even if API fails
       }
+
+      // Clear tokens locally
       await tokenStorage.clearTokens();
-      print('✓ Logout successful, tokens cleared');
+      print('✓ Logout successful, tokens cleared locally');
     } catch (e) {
       print('✗ Logout error: $e');
       rethrow;
@@ -227,7 +235,7 @@ class ApiService {
   // ============== FRIEND-RELATED ENDPOINTS ==============
 
   /// Get list of friends
-  Future<List<User>> getFriends() async {
+  Future<List<User>> getFriends({int page = 1, int limit = 10}) async {
     // Check if token is available
     if (tokenStorage.getAccessToken() == null) {
       print('✗ getFriends: No access token available');
@@ -235,13 +243,21 @@ class ApiService {
     }
 
     try {
-      final response = await dio.get('/api/v1/friends/');
+      final response = await dio.get(
+        '/api/v1/friends/',
+        queryParameters: {'page': page, 'limit': limit},
+      );
 
       if (response.statusCode == 200) {
-        final friends = (response.data as List)
+        final data = response.data;
+        final rawFriends = data is List 
+            ? data 
+            : (data['results'] as List? ?? []);
+            
+        final friends = rawFriends
             .map((friend) => User.fromJson(friend))
             .toList();
-        print('✓ Loaded ${friends.length} friends');
+        print('✓ Loaded ${friends.length} friends (page $page)');
         return friends;
       } else if (response.statusCode == 401) {
         print('✗ Unauthorized - tokens may have expired');
@@ -273,7 +289,7 @@ class ApiService {
       if (response.statusCode == 200) {
         final data = response.data;
         final results = data is List
-            ? (data as List).map((user) => User.fromJson(user)).toList()
+            ? data.map((user) => User.fromJson(user)).toList()
             : (data['results'] as List)
                 .map((user) => User.fromJson(user))
                 .toList();
@@ -287,6 +303,40 @@ class ApiService {
       }
     } on DioException catch (e) {
       print('✗ Get all users error: $e');
+      return [];
+    }
+  }
+
+  /// Get suggested users (non-friends)
+  Future<List<User>> getSuggestedUsers({int page = 1, int limit = 5}) async {
+    if (tokenStorage.getAccessToken() == null) {
+      print('⚠ getSuggestedUsers attempted without access token - tokens may not be loaded');
+      return [];
+    }
+
+    try {
+      final response = await dio.get(
+        '/api/v1/user/suggested/',
+        queryParameters: {'page': page, 'limit': limit},
+      );
+
+      if (response.statusCode == 200) {
+        final data = response.data;
+        final results = data is List
+            ? data.map((user) => User.fromJson(user)).toList()
+            : (data['results'] as List)
+                .map((user) => User.fromJson(user))
+                .toList();
+        print('✓ Loaded ${results.length} suggested users');
+        return results;
+      } else if (response.statusCode == 401) {
+        print('✗ Unauthorized - tokens may have expired');
+        return [];
+      } else {
+        throw Exception('Failed to fetch suggested users: ${response.statusCode}');
+      }
+    } on DioException catch (e) {
+      print('✗ Get suggested users error: $e');
       return [];
     }
   }
@@ -309,7 +359,7 @@ class ApiService {
       if (response.statusCode == 200) {
         final data = response.data;
         final results = data is List
-            ? (data as List).map((user) => User.fromJson(user)).toList()
+            ? data.map((user) => User.fromJson(user)).toList()
             : (data['results'] as List)
                 .map((user) => User.fromJson(user))
                 .toList();
@@ -332,7 +382,7 @@ class ApiService {
     try {
       final response = await dio.post(
         '/api/v1/friendship/request/',
-        data: {'to_user_id': targetUserId},
+        data: {'target_user_id': targetUserId},
       );
 
       if (response.statusCode == 201) {
@@ -390,7 +440,8 @@ class ApiService {
   Future<void> acceptFriendRequest(int requestId) async {
     try {
       final response = await dio.post(
-        '/api/v1/friendship/requests/$requestId/accept/',
+        '/api/v1/friendship/accept/',
+        data: {'friendship_id': requestId},
       );
 
       if (response.statusCode == 200) {
@@ -407,11 +458,12 @@ class ApiService {
   /// Reject friend request
   Future<void> rejectFriendRequest(int requestId) async {
     try {
-      final response = await dio.delete(
-        '/api/v1/friendship/requests/$requestId/',
+      final response = await dio.post(
+        '/api/v1/friendship/reject/',
+        data: {'friendship_id': requestId},
       );
 
-      if (response.statusCode == 204) {
+      if (response.statusCode == 200) {
         print('✓ Friend request rejected');
       } else {
         throw Exception('Failed to reject friend request');
@@ -466,7 +518,10 @@ class ApiService {
       final response = await dio.get('/api/v1/rooms/');
 
       if (response.statusCode == 200) {
-        final rooms = (response.data as List)
+        final data = response.data;
+        final rawRooms = data is List ? data : (data['results'] as List? ?? []);
+        
+        final rooms = rawRooms
             .map((room) => ChatRoom.fromJson(room))
             .toList();
         print('✓ Loaded ${rooms.length} rooms');
@@ -480,24 +535,80 @@ class ApiService {
     }
   }
 
-  /// Get messages in a room with pagination
-  Future<Map<String, dynamic>> getMessages(
-    int roomId, {
-    int page = 1,
-    int pageSize = 20,
+  /// Create a new group chat
+  Future<ChatRoom> createGroup({
+    required String name,
+    String? description,
+    required List<int> participantIds,
+  }) async {
+    try {
+      final response = await dio.post(
+        '/api/v1/rooms/create-group/',
+        data: {
+          'name': name,
+          'description': description ?? '',
+          'participant_ids': participantIds,
+        },
+      );
+
+      if (response.statusCode == 201) {
+        print('✓ Group created: ${response.data['room']['id']}');
+        return ChatRoom.fromJson(response.data['room']);
+      } else {
+        throw Exception('Failed to create group');
+      }
+    } on DioException catch (e) {
+      print('✗ Create group error: $e');
+      rethrow;
+    }
+  }
+
+  /// Leave a group chat
+  Future<void> leaveRoom(String roomId) async {
+    try {
+      final response = await dio.delete('/api/v1/rooms/$roomId/members/');
+
+      if (response.statusCode == 200) {
+        print('✓ Left room $roomId');
+      } else {
+        throw Exception('Failed to leave room');
+      }
+    } on DioException catch (e) {
+      print('✗ Leave room error: $e');
+      rethrow;
+    }
+  }
+
+  /// Get the latest messages in a room.
+  Future<List<ChatMessage>> getMessages(
+    String roomId, {
+    int limit = 20,
   }) async {
     try {
       final response = await dio.get(
         '/api/v1/rooms/$roomId/messages/',
         queryParameters: {
-          'page': page,
-          'page_size': pageSize,
+          'limit': limit,
         },
       );
 
       if (response.statusCode == 200) {
         print('✓ Loaded messages for room $roomId');
-        return response.data;
+        final payload = response.data;
+        final rawMessages = payload is List
+            ? payload
+            : (payload['results'] as List? ??
+                payload['messages'] as List? ??
+                const []);
+
+        return rawMessages
+            .map(
+              (message) => ChatMessage.fromJson(
+                Map<String, dynamic>.from(message as Map),
+                fallbackRoomId: roomId,
+              ),
+            )
+            .toList();
       } else {
         throw Exception('Failed to fetch messages');
       }
@@ -592,6 +703,50 @@ class ApiService {
       }
     } on DioException catch (e) {
       print('✗ React to message error: $e');
+      rethrow;
+    }
+  }
+
+  // ============== E2EE KEY MANAGEMENT ==============
+
+  /// Upload user's RSA Public Key
+  Future<void> uploadPublicKey(String publicKey, String deviceId) async {
+    try {
+      final response = await dio.post(
+        '/api/v1/keys/upload/',
+        data: {
+          'public_key': publicKey,
+          'device_id': deviceId,
+        },
+      );
+
+      if (response.statusCode == 201 || response.statusCode == 200) {
+        print('✓ Public key uploaded successfully');
+      } else {
+        throw Exception('Failed to upload public key');
+      }
+    } on DioException catch (e) {
+      print('✗ Upload public key error: $e');
+      rethrow;
+    }
+  }
+
+  /// Get another user's RSA Public Key
+  Future<String?> getPublicKey(int userId) async {
+    try {
+      final response = await dio.get('/api/v1/keys/$userId/');
+
+      if (response.statusCode == 200) {
+        return response.data['public_key'];
+      } else {
+        return null;
+      }
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 404) {
+        print('⚠ Public key not found for user $userId');
+        return null;
+      }
+      print('✗ Get public key error: $e');
       rethrow;
     }
   }

@@ -1,5 +1,5 @@
 # 💬 Chat Application - Hybrid Backend (Django + FastAPI + Flutter)
-
+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
 A **production-ready** full-stack chat application with:
 - **Django REST API** (Port 8000) - User authentication, JWT tokens, REST endpoints
 - **FastAPI WebSocket Service** (Port 8081) - Real-time chat, AI responses, streaming

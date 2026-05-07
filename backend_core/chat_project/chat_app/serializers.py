@@ -5,7 +5,7 @@ Serializers for the chat application.
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from django.contrib.auth import get_user_model
-from .models import ChatRoom, Message, AIResponse, Friendship
+from .models import ChatRoom, Message, AIResponse, Friendship, UserPublicKey
 
 User = get_user_model()
 
@@ -134,3 +134,47 @@ class FriendshipListSerializer(serializers.ModelSerializer):
         if request_user == obj.from_user:
             return UserSerializer(obj.to_user).data
         return UserSerializer(obj.from_user).data
+
+
+class LoginSerializer(serializers.Serializer):
+    """
+    Serializer for login endpoint.
+    """
+    username = serializers.CharField(required=True, help_text='Username')
+    password = serializers.CharField(required=True, write_only=True, help_text='Password')
+
+
+class LogoutSerializer(serializers.Serializer):
+    """
+    Serializer for logout endpoint.
+    """
+    refresh = serializers.CharField(required=True, help_text='Refresh token')
+
+
+class ChangePasswordSerializer(serializers.Serializer):
+    """
+    Serializer for change password endpoint.
+    """
+    old_password = serializers.CharField(required=True, write_only=True, help_text='Current password')
+    new_password = serializers.CharField(required=True, write_only=True, min_length=8, help_text='New password (minimum 8 characters)')
+    new_password_confirm = serializers.CharField(required=True, write_only=True, min_length=8, help_text='Confirm new password')
+
+
+class TokenResponseSerializer(serializers.Serializer):
+    """
+    Serializer for token response.
+    """
+    message = serializers.CharField(read_only=True)
+    user = UserSerializer(read_only=True)
+    access = serializers.CharField(read_only=True)
+    refresh = serializers.CharField(read_only=True)
+
+
+class UserPublicKeySerializer(serializers.ModelSerializer):
+    """
+    Serializer for user public keys.
+    """
+    class Meta:
+        model = UserPublicKey
+        fields = ('id', 'user', 'public_key', 'device_id', 'created_at', 'updated_at')
+        read_only_fields = ('id', 'user', 'created_at', 'updated_at')

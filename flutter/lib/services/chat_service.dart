@@ -1,6 +1,7 @@
 /// Enhanced Chat Service with JWT persistence and streaming support
 import 'package:web_socket_channel/web_socket_channel.dart';
 import '../services/api_service.dart';
+import '../services/encryption_service.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math' show min;
@@ -8,6 +9,7 @@ import '../models/chat_message.dart';
 
 class ChatService {
   final ApiService apiService;
+  final EncryptionService encryptionService;
   final String wsBaseUrl;
 
   WebSocketChannel? _webSocketChannel;
@@ -22,8 +24,12 @@ class ChatService {
 
   ChatService({
     required this.apiService,
-    this.wsBaseUrl = 'ws://192.168.1.65:8081',
-  });
+    EncryptionService? encryptionService,
+    this.wsBaseUrl = 'ws://192.168.1.65:8000',
+  }) : encryptionService = encryptionService ?? EncryptionService() {
+    _messageStreamController = StreamController<ChatMessage>.broadcast();
+    _connectionStreamController = StreamController<bool>.broadcast();
+  }
 
   // Streams
   Stream<ChatMessage> get messageStream =>
@@ -94,6 +100,9 @@ class ChatService {
     String? token,
   }) async {
     try {
+      // Disconnect existing connection if any to prevent duplicate listeners
+      await disconnectWebSocket();
+
       // Get token from TokenManager if not provided
       final accessToken = token ?? apiService.tokenManager.accessToken;
       if (accessToken == null) {
@@ -102,13 +111,9 @@ class ChatService {
 
       _currentRoomId = roomId;
 
-      // Initialize streams
-      _messageStreamController ??= StreamController<ChatMessage>.broadcast();
-      _connectionStreamController ??= StreamController<bool>.broadcast();
-
       // Connect to WebSocket
-      final wsUrl = Uri.parse('$wsBaseUrl/ws/chat/$roomId?token=$accessToken');
-      print('🔌 Connecting to WebSocket: $wsBaseUrl/ws/chat/$roomId');
+      final wsUrl = Uri.parse('$wsBaseUrl/ws/chat/$roomId/?token=$accessToken');
+      print('🔌 Connecting to WebSocket: $wsBaseUrl/ws/chat/$roomId/');
 
       _webSocketChannel = WebSocketChannel.connect(wsUrl);
 
@@ -154,15 +159,6 @@ class ChatService {
       return;
     }
 
-    // Add local message to stream with sending status
-    final localMessage = ChatMessage.local(
-      content: content,
-      userId: userId,
-      username: username,
-      roomId: roomId,
-    );
-    _messageStreamController?.add(localMessage);
-
     // Send via WebSocket with proper schema
     try {
       final message = {
@@ -177,6 +173,46 @@ class ChatService {
     } catch (e) {
       _messageStreamController?.addError('Failed to send message: $e');
       print('✗ Send message error: $e');
+    }
+  }
+
+  /// Send secure (E2EE) message
+  Future<void> sendSecureMessage({
+    required String content,
+    required String roomId,
+    required int recipientId,
+  }) async {
+    if (!_isConnected) {
+      _messageStreamController?.addError('WebSocket not connected');
+      return;
+    }
+
+    try {
+      // 1. Fetch recipient's public key
+      final recipientPublicKey = await apiService.getPublicKey(recipientId);
+      if (recipientPublicKey == null) {
+        throw Exception('Recipient does not have a public key for E2EE');
+      }
+
+      // 2. Encrypt locally
+      final encryptedData = await encryptionService.encryptMessage(content, recipientPublicKey);
+
+      // 3. Send via WebSocket
+      final message = {
+        'type': 'secure_message',
+        'recipient_id': recipientId,
+        'encrypted_payload': encryptedData['encrypted_payload'],
+        'encrypted_key': encryptedData['encrypted_key'],
+        'iv': encryptedData['iv'],
+        'room_id': roomId,
+        'timestamp': DateTime.now().toIso8601String(),
+      };
+
+      print('🔐 Sending secure message...');
+      _webSocketChannel?.sink.add(jsonEncode(message));
+    } catch (e) {
+      _messageStreamController?.addError('Failed to send secure message: $e');
+      print('✗ Secure message error: $e');
     }
   }
 
@@ -196,15 +232,6 @@ class ChatService {
       _messageStreamController?.addError('AI request cannot be empty');
       return;
     }
-
-    // Add user message
-    final userMessage = ChatMessage.local(
-      content: content,
-      userId: userId,
-      username: username,
-      roomId: roomId,
-    );
-    _messageStreamController?.add(userMessage);
 
     // Request AI response with proper schema
     try {
@@ -270,6 +297,14 @@ class ChatService {
           _messageStreamController?.add(message);
           break;
 
+        case 'secure_message':
+          // 1. Parse as secure message
+          final message = ChatMessage.fromWebSocketMessage(json, roomId);
+          
+          // 2. Decrypt if it's for us (or if we are the sender and want to see it)
+          _decryptAndEmitMessage(message);
+          break;
+
         case 'ai_response':
           final aiMessage = ChatMessage(
             id: json['message_id'] ?? '',
@@ -320,6 +355,35 @@ class ChatService {
     } catch (e) {
       print('✗ Parse message error: $e');
       _messageStreamController?.addError('Failed to parse message: $e');
+    }
+  }
+
+  /// Decrypt a secure message and emit it to the stream
+  Future<void> _decryptAndEmitMessage(ChatMessage message) async {
+    try {
+      if (message.encryptedPayload == null || 
+          message.encryptedKey == null || 
+          message.iv == null) {
+        _messageStreamController?.add(message.copyWith(
+          content: '[Error: Incomplete secure message]',
+        ));
+        return;
+      }
+
+      final decryptedContent = await encryptionService.decryptMessage(
+        encryptedPayload: message.encryptedPayload!,
+        encryptedKey: message.encryptedKey!,
+        ivBase64: message.iv!,
+      );
+
+      _messageStreamController?.add(message.copyWith(
+        content: decryptedContent,
+      ));
+    } catch (e) {
+      print('✗ Decryption error: $e');
+      _messageStreamController?.add(message.copyWith(
+        content: '[Error: Could not decrypt message]',
+      ));
     }
   }
 
@@ -391,6 +455,30 @@ class ChatService {
     _webSocketChannel = null;
     _connectionStreamController?.add(false);
     print('✓ WebSocket disconnected');
+  }
+
+  /// Setup E2EE: Generate keys if needed and upload public key
+  Future<void> setupE2EE() async {
+    try {
+      String? publicKey = await encryptionService.getLocalPublicKey();
+      
+      if (publicKey == null) {
+        print('🔑 Generating new RSA Key Pair for E2EE...');
+        final keys = await encryptionService.generateKeyPair();
+        publicKey = keys['publicKey'];
+      } else {
+        print('🔑 Local E2EE keys already exist');
+      }
+
+      if (publicKey != null) {
+        // Upload to server (deviceId could be any unique identifier or empty for now)
+        await apiService.uploadPublicKey(publicKey, 'mobile-device-1');
+        print('✓ E2EE Public Key verified on server');
+      }
+    } catch (e) {
+      print('✗ E2EE Setup error: $e');
+      // We don't throw here to avoid blocking app start, but E2EE won't work
+    }
   }
 
   /// Logout
