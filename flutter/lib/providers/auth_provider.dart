@@ -1,10 +1,12 @@
 /// Auth State Management using Provider
+import 'package:chat_app/services/api_service.dart';
 import 'package:flutter/foundation.dart';
 import '../models/user.dart';
-import '../services/api_service.dart';
+import '../services/notification_service.dart';
 
 class AuthProvider extends ChangeNotifier {
   final ApiService apiService;
+  final NotificationService notificationService;
 
   User? _currentUser;
   bool _isLoading = false;
@@ -19,7 +21,12 @@ class AuthProvider extends ChangeNotifier {
   String? get error => _error;
   bool get isAuthenticated => _isAuthenticated;
 
-  AuthProvider({required this.apiService});
+  AuthProvider({
+    required this.apiService,
+    required this.notificationService,
+  }) {
+    notificationService.setSessionExpiredCallback(handleSessionExpired);
+  }
 
   /// Initialize auth state - restore session if available
   Future<void> initialize() async {
@@ -35,6 +42,12 @@ class AuthProvider extends ChangeNotifier {
         _currentUser = await apiService.getCurrentUser();
         _isAuthenticated = true;
         print('✓ Session restored, user: ${_currentUser?.username}');
+
+        final fcmSynced = await notificationService.syncToken();
+        if (!fcmSynced) {
+          await handleSessionExpired();
+          return;
+        }
       } else {
         _isAuthenticated = false;
       }
@@ -100,6 +113,15 @@ class AuthProvider extends ChangeNotifier {
       _isAuthenticated = true;
       _isAuthenticating = false;
       notifyListeners();
+
+      // Sync FCM token upon successful login
+      final fcmSynced = await notificationService.syncToken();
+      if (!fcmSynced) {
+        await handleSessionExpired();
+        _error = 'Session expired. Please log in again.';
+        return false;
+      }
+
       print('✓ Login successful');
       return true;
     } catch (e) {
@@ -118,6 +140,9 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
+      // Delete FCM token from backend before logging out
+      await notificationService.deleteToken();
+
       await apiService.logout();
       _currentUser = null;
       _isAuthenticated = false;
@@ -129,6 +154,22 @@ class AuthProvider extends ChangeNotifier {
       _isLoading = false;
       notifyListeners();
       print('✗ Logout failed: $e');
+    }
+  }
+
+  /// Force a logout when the session is no longer valid.
+  Future<void> handleSessionExpired() async {
+    try {
+      await apiService.forceLogout();
+      _currentUser = null;
+      _isAuthenticated = false;
+      _isAuthenticating = false;
+      _isLoading = false;
+      _error = 'Session expired. Please log in again.';
+      notifyListeners();
+      print('✓ Session expired - user logged out');
+    } catch (e) {
+      print('✗ Failed to handle expired session: $e');
     }
   }
 

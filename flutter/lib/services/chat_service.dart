@@ -6,6 +6,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math' show min;
 import '../models/chat_message.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 
 class ChatService {
   final ApiService apiService;
@@ -21,6 +22,10 @@ class ChatService {
   int _reconnectionAttempts = 0;
   static const int _maxReconnectionAttempts = 5;
   String? _currentRoomId;
+  // Connectivity
+  final Connectivity _connectivity = Connectivity();
+  StreamSubscription<ConnectivityResult>? _connectivitySubscription;
+  bool _isOnline = true;
 
   ChatService({
     required this.apiService,
@@ -29,6 +34,41 @@ class ChatService {
   }) : encryptionService = encryptionService ?? EncryptionService() {
     _messageStreamController = StreamController<ChatMessage>.broadcast();
     _connectionStreamController = StreamController<bool>.broadcast();
+    _initConnectivityListener();
+  }
+
+  void _initConnectivityListener() async {
+    try {
+      final status = await _connectivity.checkConnectivity();
+      _isOnline = status != ConnectivityResult.none;
+    } catch (e) {
+      _isOnline = true;
+    }
+
+    _connectivitySubscription =
+        _connectivity.onConnectivityChanged.listen((result) async {
+      final nowOnline = result != ConnectivityResult.none;
+      if (_isOnline == nowOnline) return;
+      _isOnline = nowOnline;
+      print('🔌 Connectivity changed: ${_isOnline ? 'online' : 'offline'}');
+
+      if (!_isOnline) {
+        // When going offline, cancel reconnection attempts and mark disconnected
+        _reconnectionTimer?.cancel();
+        _reconnectionTimer = null;
+        _connectionStreamController?.add(false);
+        _messageStreamController?.addError('Offline - connection paused');
+      } else {
+        // When back online, attempt to reconnect immediately if we have a room
+        if (_currentRoomId != null && !_isConnected) {
+          try {
+            await connectWebSocket(roomId: _currentRoomId!);
+          } catch (_) {
+            // connectWebSocket will schedule reconnection if needed
+          }
+        }
+      }
+    });
   }
 
   // Streams
@@ -104,18 +144,50 @@ class ChatService {
       await disconnectWebSocket();
 
       // Get token from TokenManager if not provided
-      final accessToken = token ?? apiService.tokenManager.accessToken;
+      var accessToken = token ?? apiService.tokenManager.accessToken;
+
+      // If no token available, try to restore session first
       if (accessToken == null) {
-        throw Exception('No authentication token available');
+        print('⚠ No token available, attempting to restore session...');
+        final sessionRestored = await apiService.restoreSession();
+        if (!sessionRestored) {
+          throw Exception(
+              'No authentication token available - please login first');
+        }
+        accessToken = apiService.tokenManager.accessToken;
+      }
+
+      if (accessToken == null) {
+        throw Exception('Failed to retrieve authentication token');
       }
 
       _currentRoomId = roomId;
 
-      // Connect to WebSocket
-      final wsUrl = Uri.parse('$wsBaseUrl/ws/chat/$roomId/?token=$accessToken');
-      print('🔌 Connecting to WebSocket: $wsBaseUrl/ws/chat/$roomId/');
+      // Construct websocket URI reliably from wsBaseUrl (supports http/https/ws/wss)
+      final baseUri = Uri.parse(wsBaseUrl);
+      String scheme;
+      if (baseUri.scheme == 'http') {
+        scheme = 'ws';
+      } else if (baseUri.scheme == 'https') {
+        scheme = 'wss';
+      } else if (baseUri.scheme == 'ws' || baseUri.scheme == 'wss') {
+        scheme = baseUri.scheme;
+      } else {
+        // Fallback to ws
+        scheme = 'ws';
+      }
 
-      _webSocketChannel = WebSocketChannel.connect(wsUrl);
+      final wsUri = Uri(
+        scheme: scheme,
+        host: baseUri.host,
+        port: baseUri.hasPort ? baseUri.port : null,
+        path: '/ws/chat/$roomId/',
+        queryParameters: {'token': accessToken},
+      );
+      print(
+          '🔌 Connecting to WebSocket: ${wsUri.toString().replaceAll(RegExp(r'token=.*'), 'token=***')}');
+
+      _webSocketChannel = WebSocketChannel.connect(wsUri);
 
       // Listen to incoming messages
       _webSocketChannel!.stream.listen(
@@ -132,7 +204,12 @@ class ChatService {
       print('✗ WebSocket connection error: $e');
       _isConnected = false;
       _connectionStreamController?.add(false);
-      await _scheduleReconnection(roomId, token);
+      // Only schedule reconnection when device is online
+      if (_isOnline) {
+        await _scheduleReconnection(roomId, token);
+      } else {
+        print('⚠ Offline - not scheduling reconnection');
+      }
       rethrow;
     }
   }
@@ -195,7 +272,8 @@ class ChatService {
       }
 
       // 2. Encrypt locally
-      final encryptedData = await encryptionService.encryptMessage(content, recipientPublicKey);
+      final encryptedData =
+          await encryptionService.encryptMessage(content, recipientPublicKey);
 
       // 3. Send via WebSocket
       final message = {
@@ -283,6 +361,21 @@ class ChatService {
     });
   }
 
+  /// Mark a message as read
+  void sendMarkRead(String roomId, String messageId) {
+    if (!_isConnected) return;
+    try {
+      final message = {
+        'type': 'mark_read',
+        'room_id': roomId,
+        'message_id': messageId,
+      };
+      _webSocketChannel?.sink.add(jsonEncode(message));
+    } catch (e) {
+      print('⚠ Mark read error: $e');
+    }
+  }
+
   /// Handle incoming WebSocket messages
   void _handleWebSocketMessage(String messageText, String roomId) {
     try {
@@ -300,7 +393,7 @@ class ChatService {
         case 'secure_message':
           // 1. Parse as secure message
           final message = ChatMessage.fromWebSocketMessage(json, roomId);
-          
+
           // 2. Decrypt if it's for us (or if we are the sender and want to see it)
           _decryptAndEmitMessage(message);
           break;
@@ -328,6 +421,19 @@ class ChatService {
 
         case 'stop_typing':
           // User stopped typing
+          break;
+
+        case 'message_read':
+          final readMessage = ChatMessage(
+            id: json['message_id'] ?? '',
+            content: '',
+            userId: json['user_id'] ?? 0,
+            username: '',
+            roomId: roomId,
+            status: MessageStatus.read,
+            timestamp: DateTime.now(),
+          );
+          _messageStreamController?.add(readMessage);
           break;
 
         case 'user_joined':
@@ -361,8 +467,8 @@ class ChatService {
   /// Decrypt a secure message and emit it to the stream
   Future<void> _decryptAndEmitMessage(ChatMessage message) async {
     try {
-      if (message.encryptedPayload == null || 
-          message.encryptedKey == null || 
+      if (message.encryptedPayload == null ||
+          message.encryptedKey == null ||
           message.iv == null) {
         _messageStreamController?.add(message.copyWith(
           content: '[Error: Incomplete secure message]',
@@ -406,6 +512,12 @@ class ChatService {
 
   /// Schedule automatic reconnection with exponential backoff
   Future<void> _scheduleReconnection(String roomId, String? token) async {
+    // Do not attempt reconnect if offline
+    if (!_isOnline) {
+      print('⚠ Device offline — skipping reconnection schedule');
+      return;
+    }
+
     if (_reconnectionAttempts >= _maxReconnectionAttempts) {
       _messageStreamController?.addError(
         'Failed to reconnect after $_maxReconnectionAttempts attempts',
@@ -457,11 +569,13 @@ class ChatService {
     print('✓ WebSocket disconnected');
   }
 
+  // (connectivity cancellation merged into final dispose below)
+
   /// Setup E2EE: Generate keys if needed and upload public key
   Future<void> setupE2EE() async {
     try {
       String? publicKey = await encryptionService.getLocalPublicKey();
-      
+
       if (publicKey == null) {
         print('🔑 Generating new RSA Key Pair for E2EE...');
         final keys = await encryptionService.generateKeyPair();
@@ -490,6 +604,7 @@ class ChatService {
 
   /// Dispose resources
   Future<void> dispose() async {
+    _connectivitySubscription?.cancel();
     _reconnectionTimer?.cancel();
     _typingDebounceTimer?.cancel();
     await _messageStreamController?.close();

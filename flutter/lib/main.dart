@@ -1,17 +1,31 @@
-/// Main Flutter App - Chat Application
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'services/api_service.dart';
 import 'services/chat_service.dart';
 import 'services/hive_token_storage.dart';
+import 'services/notification_service.dart';
 import 'providers/auth_provider.dart';
 import 'providers/room_provider.dart';
 import 'providers/chat_provider.dart';
 import 'providers/friend_provider.dart';
 import 'screens/auth_screen.dart';
 import 'screens/chat_list_screen.dart';
+import 'screens/first_time_splash.dart';
 
 void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // Initialize Firebase (Requires google-services.json / GoogleService-Info.plist)
+  try {
+    await Firebase.initializeApp();
+    print('✓ Firebase initialized');
+  } catch (e) {
+    print('⚠ Firebase initialization failed: $e');
+    print(
+        'Note: You need to add google-services.json (Android) or GoogleService-Info.plist (iOS) to your project.');
+  }
+
   // Initialize Hive for token storage
   final tokenStorage = HiveTokenStorage();
   await tokenStorage.initialize();
@@ -33,35 +47,20 @@ class MyApp extends StatefulWidget {
 class _MyAppState extends State<MyApp> {
   late final ApiService _apiService;
   late final ChatService _chatService;
-  bool _isChecking = true;
-  bool _isAuthenticated = false;
+  late final NotificationService _notificationService;
 
   @override
   void initState() {
     super.initState();
     _apiService = ApiService(tokenStorage: widget.tokenStorage);
     _chatService = ChatService(apiService: _apiService);
-    _checkAuthentication();
+    _notificationService = NotificationService(apiService: _apiService);
+
+    _initializeNotifications();
   }
 
-  Future<void> _checkAuthentication() async {
-    try {
-      final restored = await _chatService.restoreSession();
-      if (restored) {
-        // Ensure E2EE keys are set up
-        await _chatService.setupE2EE();
-      }
-      setState(() {
-        _isAuthenticated = restored;
-        _isChecking = false;
-      });
-    } catch (e) {
-      print('Authentication error: $e');
-      setState(() {
-        _isAuthenticated = false;
-        _isChecking = false;
-      });
-    }
+  Future<void> _initializeNotifications() async {
+    await _notificationService.initialize();
   }
 
   @override
@@ -85,39 +84,59 @@ class _MyAppState extends State<MyApp> {
         ),
         // Auth Provider for authentication state management
         ChangeNotifierProvider(
-          create: (_) => AuthProvider(apiService: _apiService),
+          create: (_) {
+            final authProvider = AuthProvider(
+              apiService: _apiService,
+              notificationService: _notificationService,
+            );
+            Future.microtask(authProvider.initialize);
+            return authProvider;
+          },
         ),
         // Room Provider for room management
         ChangeNotifierProvider(
-          create: (_) => RoomProvider(apiService: _apiService),
+          create: (_) => RoomProvider(
+            apiService: _apiService,
+            chatService: _chatService,
+          ),
         ),
         // Chat Provider for real-time chat (depends on ChatService)
         ChangeNotifierProvider(
           create: (_) => ChatProvider(chatService: _chatService),
+        ),
+        // Notification Service
+        Provider<NotificationService>(
+          create: (_) => _notificationService,
         ),
         // Friend Provider for friend management
         ChangeNotifierProvider(
           create: (_) => FriendProvider(apiService: _apiService),
         ),
       ],
-      child: MaterialApp(
-        title: 'Chat App',
-        debugShowCheckedModeBanner: false,
-        theme: ThemeData(
-    
-          primarySwatch: Colors.blue,
-          useMaterial3: true,
-        ),
-        darkTheme: ThemeData.dark(
-          useMaterial3: true,
-        ),
-        themeMode: ThemeMode.light,
-        home: _isChecking
-            ? const SplashScreen()
-            : (_isAuthenticated ? ChatListScreen() : AuthScreen()),
-        routes: {
-          '/auth': (context) => AuthScreen(),
-          '/chat-list': (context) => ChatListScreen(),
+      child: Consumer<AuthProvider>(
+        builder: (context, authProvider, _) {
+          return MaterialApp(
+            title: 'Chat App',
+            debugShowCheckedModeBanner: false,
+            theme: ThemeData(
+              primarySwatch: Colors.blue,
+              useMaterial3: true,
+            ),
+            darkTheme: ThemeData.dark(
+              useMaterial3: true,
+            ),
+            themeMode: ThemeMode.light,
+            home: authProvider.isLoading
+                ? const SplashScreen()
+                : (authProvider.isAuthenticated
+                    ? ChatListScreen()
+                    : const FirstTimeSplashScreen()),
+            routes: {
+              '/auth': (context) => AuthScreen(),
+              '/first-time': (context) => const FirstTimeSplashScreen(),
+              '/chat-list': (context) => ChatListScreen(),
+            },
+          );
         },
       ),
     );

@@ -13,6 +13,9 @@ class ChatRoom {
   final DateTime createdAt;
   final DateTime updatedAt;
 
+  final String? lastMessage;
+  final DateTime lastMessageTimestamp;
+
   ChatRoom({
     required this.id,
     required this.name,
@@ -25,6 +28,8 @@ class ChatRoom {
     this.isActive = true,
     required this.createdAt,
     required this.updatedAt,
+    this.lastMessage,
+    required this.lastMessageTimestamp,
   });
 
   factory ChatRoom.fromJson(Map<String, dynamic> json) {
@@ -40,6 +45,10 @@ class ChatRoom {
       isActive: json['is_active'] as bool? ?? true,
       createdAt: DateTime.parse(json['created_at'] as String),
       updatedAt: DateTime.parse(json['updated_at'] as String),
+      lastMessage: json['last_message'] as String?,
+      lastMessageTimestamp: json['last_message_timestamp'] != null
+          ? DateTime.parse(json['last_message_timestamp'] as String)
+          : DateTime.parse(json['updated_at'] as String),
     );
   }
 
@@ -55,6 +64,8 @@ class ChatRoom {
         'is_active': isActive,
         'created_at': createdAt.toIso8601String(),
         'updated_at': updatedAt.toIso8601String(),
+        'last_message': lastMessage,
+        'last_message_timestamp': lastMessageTimestamp.toIso8601String(),
       };
 
   ChatRoom copyWith({
@@ -69,6 +80,8 @@ class ChatRoom {
     bool? isActive,
     DateTime? createdAt,
     DateTime? updatedAt,
+    String? lastMessage,
+    DateTime? lastMessageTimestamp,
   }) {
     return ChatRoom(
       id: id ?? this.id,
@@ -82,6 +95,8 @@ class ChatRoom {
       isActive: isActive ?? this.isActive,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
+      lastMessage: lastMessage ?? this.lastMessage,
+      lastMessageTimestamp: lastMessageTimestamp ?? this.lastMessageTimestamp,
     );
   }
 

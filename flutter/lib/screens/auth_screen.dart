@@ -94,8 +94,8 @@ class _LoginPageState extends State<LoginPage> {
     try {
       final apiService = ApiService(baseUrl: 'http://192.168.1.65:8000');
       final response = await apiService.login(
-        username: _usernameController.text,
-        password: _passwordController.text,
+        username: _usernameController.text.trim(),
+        password: _passwordController.text.trim(),
       );
 
       if (!mounted) return;
@@ -266,20 +266,20 @@ class _RegisterPageState extends State<RegisterPage> {
   }
 
   Future<void> _register() async {
-    if (_usernameController.text.isEmpty ||
-        _emailController.text.isEmpty ||
-        _passwordController.text.isEmpty ||
-        _confirmPasswordController.text.isEmpty) {
+    if (_usernameController.text.trim().isEmpty ||
+        _emailController.text.trim().isEmpty ||
+        _passwordController.text.trim().isEmpty ||
+        _confirmPasswordController.text.trim().isEmpty) {
       setState(() => _error = 'Please fill in all fields');
       return;
     }
 
-    if (_passwordController.text != _confirmPasswordController.text) {
+    if (_passwordController.text.trim() != _confirmPasswordController.text.trim()) {
       setState(() => _error = 'Passwords do not match');
       return;
     }
 
-    if (_passwordController.text.length < 8) {
+    if (_passwordController.text.trim().length < 8) {
       setState(() => _error = 'Password must be at least 8 characters');
       return;
     }
@@ -291,19 +291,23 @@ class _RegisterPageState extends State<RegisterPage> {
 
     try {
       final apiService = ApiService(baseUrl: 'http://192.168.1.65:8000');
-      await apiService.register(
-        username: _usernameController.text,
-        email: _emailController.text,
-        password: _passwordController.text,
+      final authResponse = await apiService.register(
+        username: _usernameController.text.trim(),
+        email: _emailController.text.trim(),
+        password: _passwordController.text.trim(),
       );
 
       if (!mounted) return;
 
-      // Show success and switch to login
+      // Tokens are saved by ApiService; navigate directly to chat list
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Registration successful! Please sign in.')),
+        SnackBar(content: Text('Registration successful! Logging you in...')),
       );
-      widget.onSwitchToLogin();
+
+      Navigator.of(context).pushReplacementNamed('/chat-list', arguments: {
+        'username': authResponse.user['username'],
+        'userId': authResponse.user['id'],
+      });
     } catch (e) {
       setState(() {
         _error = e.toString().replaceAll('Exception: ', '');

@@ -115,13 +115,21 @@ class ChatRepository {
         throw Exception('Not authenticated');
       }
 
-      // Construct WebSocket URL
-      final wsUrl =
-          'ws://${apiService.baseUrl.replaceFirst('http://', '').replaceFirst(':8000', ':8000')}/ws/chat/$roomId/?token=$token';
-      debugPrint('🔗 Connecting to WebSocket: ws://.../{roomId}/?token=***');
+      // Construct WebSocket URL robustly from API base (supports http/https)
+      final baseUri = Uri.parse(apiService.baseUrl);
+      final wsScheme = (baseUri.scheme == 'https') ? 'wss' : 'ws';
+      final wsUri = Uri(
+        scheme: wsScheme,
+        host: baseUri.host,
+        port: baseUri.hasPort ? baseUri.port : null,
+        path: '/ws/chat/$roomId/',
+        queryParameters: {'token': token},
+      );
+      debugPrint(
+          '🔗 Connecting to WebSocket: ${wsUri.toString().replaceAll(RegExp(r'token=.*'), 'token=***')}');
 
       // Create WebSocket connection
-      final channel = WebSocketChannel.connect(Uri.parse(wsUrl));
+      final channel = WebSocketChannel.connect(wsUri);
 
       // Create message stream controller
       final streamController = StreamController<dynamic>.broadcast(

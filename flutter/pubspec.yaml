@@ -20,6 +20,11 @@ dependencies:
   
   # WebSocket
   web_socket_channel: ^2.4.0
+  # Connectivity detection
+  connectivity_plus: ^4.0.0
+  # Firebase
+  firebase_core: ^2.24.2
+  firebase_messaging: ^14.7.10
   
   # State Management
   provider: ^6.0.0

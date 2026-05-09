@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/friend.dart';
 import '../providers/friend_provider.dart';
+import '../providers/room_provider.dart';
 import '../services/api_service.dart';
 import 'chat_screen.dart';
 
@@ -63,6 +64,10 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
 
       if (!mounted) return;
 
+      // Add the new group to RoomProvider
+      final roomProvider = context.read<RoomProvider>();
+      roomProvider.addRoom(room);
+
       // Navigate to the new chat screen
       final chatProvider = context.read<ChatProvider>();
       Navigator.pushReplacement(
@@ -100,14 +105,16 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
           if (_isCreating)
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 16),
-              child: Center(child: CircularProgressIndicator(color: Colors.white)),
+              child:
+                  Center(child: CircularProgressIndicator(color: Colors.white)),
             )
           else
             TextButton(
               onPressed: _createGroup,
               child: const Text(
                 'CREATE',
-                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                style:
+                    TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
               ),
             ),
         ],
@@ -160,7 +167,8 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
           Expanded(
             child: Consumer<FriendProvider>(
               builder: (context, friendProvider, _) {
-                if (friendProvider.isLoading && friendProvider.friends.isEmpty) {
+                if (friendProvider.isLoading &&
+                    friendProvider.friends.isEmpty) {
                   return const Center(child: CircularProgressIndicator());
                 }
 
@@ -196,6 +204,31 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
                   },
                 );
               },
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: _isCreating ? null : _createGroup,
+                icon: _isCreating
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor:
+                              AlwaysStoppedAnimation<Color>(Colors.white),
+                        ),
+                      )
+                    : const Icon(Icons.group_add),
+                label: Text(_isCreating ? 'Creating...' : 'Create Group'),
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  backgroundColor: Theme.of(context).primaryColor,
+                ),
+              ),
             ),
           ),
         ],

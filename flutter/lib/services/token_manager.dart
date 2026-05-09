@@ -33,9 +33,19 @@ class TokenPayload {
 class TokenManager {
   final HiveTokenStorage tokenStorage;
   Timer? _refreshTimer;
+  Future<String?> Function()? _refreshCallback;
+  Future<void> Function()? _sessionExpiredCallback;
 
   TokenManager({required HiveTokenStorage tokenStorage})
       : tokenStorage = tokenStorage;
+
+  void attachCallbacks({
+    Future<String?> Function()? refreshCallback,
+    Future<void> Function()? sessionExpiredCallback,
+  }) {
+    _refreshCallback = refreshCallback;
+    _sessionExpiredCallback = sessionExpiredCallback;
+  }
 
   // Getters that read from Hive storage
   String? get accessToken => tokenStorage.getAccessToken();
@@ -150,17 +160,42 @@ class TokenManager {
     final timeUntilRefresh = payload.timeUntilExpiry - Duration(minutes: 5);
 
     if (timeUntilRefresh.isNegative) {
-      print('⚠ Token expires within 5 minutes, not scheduling refresh');
+      print('⚠ Token expires within 5 minutes, refreshing immediately');
+      _refreshTimer = Timer(Duration.zero, _handleTokenRefresh);
       return;
     }
 
-    _refreshTimer = Timer(timeUntilRefresh, () {
-      print('⏱ Scheduled token refresh triggered');
-      // Note: Actual refresh is handled by Dio interceptor on 401 response
-    });
+    _refreshTimer = Timer(timeUntilRefresh, _handleTokenRefresh);
 
     print(
         '📅 Token refresh scheduled in ${timeUntilRefresh.inMinutes} minutes');
+  }
+
+  Future<void> _handleTokenRefresh() async {
+    print('⏱ Scheduled token refresh triggered');
+
+    final refreshCallback = _refreshCallback;
+    if (refreshCallback == null) {
+      print('⚠ No refresh callback registered - skipping background refresh');
+      return;
+    }
+
+    try {
+      final newAccessToken = await refreshCallback();
+      if (newAccessToken == null) {
+        print('✗ Background refresh failed - refresh token likely expired');
+        await _sessionExpiredCallback?.call();
+        await clearTokens();
+        return;
+      }
+
+      await updateAccessToken(newAccessToken);
+      print('✓ Background access token refresh completed');
+    } catch (e) {
+      print('✗ Background token refresh error: $e');
+      await _sessionExpiredCallback?.call();
+      await clearTokens();
+    }
   }
 
   /// Get token status for debugging

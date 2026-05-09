@@ -25,6 +25,10 @@ class ApiService {
       baseUrl: baseUrl,
     );
     tokenManager = TokenManager(tokenStorage: this.tokenStorage);
+    tokenManager.attachCallbacks(
+      refreshCallback: refreshAccessToken,
+      sessionExpiredCallback: forceLogout,
+    );
   }
 
   /// 1. Register a new user
@@ -129,6 +133,57 @@ class ApiService {
       print('✗ Logout error: $e');
       rethrow;
     }
+  }
+
+  /// Refresh access token using the stored refresh token.
+  /// Returns the new access token on success, or null if the refresh token is expired/invalid.
+  Future<String?> refreshAccessToken() async {
+    try {
+      final refreshToken = tokenStorage.getRefreshToken();
+      if (refreshToken == null) {
+        print('✗ No refresh token available for access refresh');
+        return null;
+      }
+
+      final response = await dio.post(
+        '/api/v1/auth/token/refresh/',
+        data: {'refresh': refreshToken},
+      );
+
+      if (response.statusCode == 200) {
+        final newAccessToken = response.data['access'] as String?;
+        if (newAccessToken == null || newAccessToken.isEmpty) {
+          print('✗ Refresh succeeded but no access token was returned');
+          return null;
+        }
+        print('✓ Access token refreshed in background');
+        return newAccessToken;
+      }
+
+      if (response.statusCode == 401) {
+        print('✗ Refresh token expired or invalid');
+        await forceLogout();
+        return null;
+      }
+
+      print(
+          '✗ Unexpected refresh response: ${response.statusCode} ${response.data}');
+      return null;
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 401) {
+        print('✗ Refresh token expired or invalid');
+        await forceLogout();
+        return null;
+      }
+      print('✗ Background access token refresh error: $e');
+      return null;
+    }
+  }
+
+  /// Clear local session state immediately.
+  Future<void> forceLogout() async {
+    await tokenStorage.clearTokens();
+    print('✓ Local session cleared');
   }
 
   /// 4. Get current user info
@@ -250,13 +305,11 @@ class ApiService {
 
       if (response.statusCode == 200) {
         final data = response.data;
-        final rawFriends = data is List 
-            ? data 
-            : (data['results'] as List? ?? []);
-            
-        final friends = rawFriends
-            .map((friend) => User.fromJson(friend))
-            .toList();
+        final rawFriends =
+            data is List ? data : (data['results'] as List? ?? []);
+
+        final friends =
+            rawFriends.map((friend) => User.fromJson(friend)).toList();
         print('✓ Loaded ${friends.length} friends (page $page)');
         return friends;
       } else if (response.statusCode == 401) {
@@ -310,7 +363,8 @@ class ApiService {
   /// Get suggested users (non-friends)
   Future<List<User>> getSuggestedUsers({int page = 1, int limit = 5}) async {
     if (tokenStorage.getAccessToken() == null) {
-      print('⚠ getSuggestedUsers attempted without access token - tokens may not be loaded');
+      print(
+          '⚠ getSuggestedUsers attempted without access token - tokens may not be loaded');
       return [];
     }
 
@@ -333,7 +387,8 @@ class ApiService {
         print('✗ Unauthorized - tokens may have expired');
         return [];
       } else {
-        throw Exception('Failed to fetch suggested users: ${response.statusCode}');
+        throw Exception(
+            'Failed to fetch suggested users: ${response.statusCode}');
       }
     } on DioException catch (e) {
       print('✗ Get suggested users error: $e');
@@ -520,10 +575,8 @@ class ApiService {
       if (response.statusCode == 200) {
         final data = response.data;
         final rawRooms = data is List ? data : (data['results'] as List? ?? []);
-        
-        final rooms = rawRooms
-            .map((room) => ChatRoom.fromJson(room))
-            .toList();
+
+        final rooms = rawRooms.map((room) => ChatRoom.fromJson(room)).toList();
         print('✓ Loaded ${rooms.length} rooms');
         return rooms;
       } else {
@@ -575,6 +628,64 @@ class ApiService {
       }
     } on DioException catch (e) {
       print('✗ Leave room error: $e');
+      rethrow;
+    }
+  }
+
+  /// Add a member to a group chat
+  Future<void> addRoomMember({
+    required String roomId,
+    required int userId,
+  }) async {
+    try {
+      final response = await dio.post(
+        '/api/v1/rooms/$roomId/members/',
+        data: {'user_id': userId},
+      );
+
+      if (response.statusCode == 200) {
+        print('✓ Added user $userId to room $roomId');
+      } else {
+        throw Exception('Failed to add member');
+      }
+    } on DioException catch (e) {
+      print('✗ Add room member error: $e');
+      rethrow;
+    }
+  }
+
+  /// Get all members in a room
+  Future<Map<String, dynamic>> getRoomMembers(String roomId) async {
+    try {
+      final response = await dio.get('/api/v1/rooms/$roomId/members/');
+
+      if (response.statusCode == 200) {
+        return Map<String, dynamic>.from(response.data as Map);
+      }
+
+      throw Exception('Failed to load room members');
+    } on DioException catch (e) {
+      print('✗ Get room members error: $e');
+      rethrow;
+    }
+  }
+
+  /// Remove a specific member from a group chat
+  Future<void> removeRoomMember({
+    required String roomId,
+    required int userId,
+  }) async {
+    try {
+      final response =
+          await dio.delete('/api/v1/rooms/$roomId/members/$userId/');
+
+      if (response.statusCode == 200) {
+        print('✓ Removed user $userId from room $roomId');
+      } else {
+        throw Exception('Failed to remove member');
+      }
+    } on DioException catch (e) {
+      print('✗ Remove room member error: $e');
       rethrow;
     }
   }
@@ -720,12 +831,22 @@ class ApiService {
         },
       );
 
-      if (response.statusCode == 201 || response.statusCode == 200) {
+      if (response.statusCode != null &&
+          response.statusCode! >= 200 &&
+          response.statusCode! < 300) {
         print('✓ Public key uploaded successfully');
       } else {
-        throw Exception('Failed to upload public key');
+        throw Exception(
+          'Failed to upload public key: '
+          'status=${response.statusCode}, body=${response.data}',
+        );
       }
     } on DioException catch (e) {
+      final statusCode = e.response?.statusCode;
+      final responseBody = e.response?.data;
+      if (statusCode != null) {
+        print('✗ Upload public key response: $statusCode $responseBody');
+      }
       print('✗ Upload public key error: $e');
       rethrow;
     }
@@ -750,6 +871,63 @@ class ApiService {
       rethrow;
     }
   }
+
+  // ============== PUSH NOTIFICATIONS ==============
+
+  /// Register FCM device token
+  Future<void> registerDevice(String registrationId, String type) async {
+    try {
+      final response = await dio.post(
+        '/api/v1/devices/register/',
+        data: {
+          'registration_id': registrationId,
+          'type': type,
+        },
+      );
+
+      if (response.statusCode == 201 || response.statusCode == 200) {
+        print('✓ Device registered for push notifications');
+      } else if (response.statusCode == 401) {
+        throw SessionExpiredException(
+          'Session expired while registering device: ${response.data}',
+        );
+      } else {
+        throw Exception(
+          'Failed to register device: '
+          'status=${response.statusCode}, body=${response.data}',
+        );
+      }
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 401) {
+        throw SessionExpiredException(
+          'Session expired while registering device: ${e.response?.data}',
+        );
+      }
+      print('✗ Device registration error: $e');
+      rethrow;
+    }
+  }
+
+  /// Unregister FCM device token
+  Future<void> unregisterDevice(String registrationId) async {
+    try {
+      final response = await dio.post(
+        '/api/v1/devices/unregister/',
+        data: {
+          'registration_id': registrationId,
+        },
+      );
+
+      if (response.statusCode == 200) {
+        print('✓ Device unregistered from push notifications');
+      } else {
+        throw Exception('Failed to unregister device');
+      }
+    } on DioException catch (e) {
+      print('✗ Device unregistration error: $e');
+      rethrow;
+    }
+  }
 }
 
 /// Auth Response model
@@ -771,4 +949,13 @@ class AuthResponse {
       user: json['user'] ?? {},
     );
   }
+}
+
+class SessionExpiredException implements Exception {
+  final String message;
+
+  SessionExpiredException(this.message);
+
+  @override
+  String toString() => 'SessionExpiredException: $message';
 }

@@ -1,5 +1,6 @@
 /// WebSocket Service for real-time chat with Django Channels
 import 'package:web_socket_channel/web_socket_channel.dart';
+import 'package:web_socket_channel/src/exception.dart';
 import 'dart:convert';
 import 'dart:async';
 
@@ -68,8 +69,14 @@ class WebSocketService {
           }
         },
         onError: (error) {
-          print('WebSocket error: $error');
-          _messageController.addError(error);
+          if (error is WebSocketChannelException) {
+            print('WebSocket channel error: ${error.message}');
+            _messageController
+                .addError(WebSocketChannelException.from(error.inner ?? error));
+          } else {
+            print('WebSocket error: $error');
+            _messageController.addError(error);
+          }
         },
         onDone: () {
           print('WebSocket connection closed');
@@ -79,14 +86,18 @@ class WebSocketService {
 
       print('WebSocket connected to room: $roomId');
     } catch (e) {
-      throw Exception('WebSocket connection error: $e');
+      if (e is WebSocketChannelException) {
+        throw WebSocketChannelException(
+            'WebSocket connection error: ${e.message}');
+      }
+      throw WebSocketChannelException('WebSocket connection error: $e');
     }
   }
 
   /// Send a text message
   void sendTextMessage(String content) {
     if (_channel == null) {
-      throw Exception('WebSocket not connected');
+      throw WebSocketChannelException('WebSocket not connected');
     }
 
     final message = {'type': 'text_message', 'content': content};
@@ -97,7 +108,7 @@ class WebSocketService {
   /// Request AI response
   void requestAIResponse(String content) {
     if (_channel == null) {
-      throw Exception('WebSocket not connected');
+      throw WebSocketChannelException('WebSocket not connected');
     }
 
     final message = {'type': 'ai_request', 'content': content};
@@ -108,7 +119,7 @@ class WebSocketService {
   /// Send typing indicator
   void sendTypingIndicator() {
     if (_channel == null) {
-      throw Exception('WebSocket not connected');
+      throw WebSocketChannelException('WebSocket not connected');
     }
 
     final message = {'type': 'typing'};
@@ -119,7 +130,7 @@ class WebSocketService {
   /// Send a custom message
   void sendMessage(Map<String, dynamic> messageData) {
     if (_channel == null) {
-      throw Exception('WebSocket not connected');
+      throw WebSocketChannelException('WebSocket not connected');
     }
 
     _channel!.sink.add(jsonEncode(messageData));

@@ -5,11 +5,13 @@ import '../models/user.dart';
 class UserProfileScreen extends StatelessWidget {
   final User user;
   final VoidCallback onLogout;
+  final bool isCurrentUser;
 
   const UserProfileScreen({
     Key? key,
     required this.user,
     required this.onLogout,
+    this.isCurrentUser = false,
   }) : super(key: key);
 
   @override
@@ -86,7 +88,7 @@ class UserProfileScreen extends StatelessWidget {
                       padding:
                           EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                       decoration: BoxDecoration(
-                        color: user.isOnline ? Colors.green : Colors.grey,
+                        color: (user.isOnline || isCurrentUser) ? Colors.green : Colors.grey,
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Row(
@@ -98,7 +100,7 @@ class UserProfileScreen extends StatelessWidget {
                           ),
                           SizedBox(width: 8),
                           Text(
-                            user.isOnline ? 'Online' : 'Offline',
+                            (user.isOnline || isCurrentUser) ? 'Online' : 'Offline',
                             style: TextStyle(
                               color: Colors.white,
                               fontWeight: FontWeight.w600,

@@ -1,15 +1,48 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import '../models/chat_room.dart';
+import '../models/chat_message.dart';
 import '../services/api_service.dart';
+import '../services/chat_service.dart';
 
 class RoomProvider extends ChangeNotifier {
   final ApiService apiService;
+  final ChatService chatService;
+  StreamSubscription? _messageSubscription;
 
   List<ChatRoom> _rooms = [];
   bool _isLoading = false;
   String? _error;
 
-  RoomProvider({required this.apiService});
+  RoomProvider({
+    required this.apiService,
+    required this.chatService,
+  }) {
+    _initMessageListener();
+  }
+
+  void _initMessageListener() {
+    _messageSubscription = chatService.messageStream.listen((message) {
+      _updateRoomLastMessage(message);
+    });
+  }
+
+  void _updateRoomLastMessage(ChatMessage message) {
+    final index = _rooms.indexWhere((r) => r.id == message.roomId);
+    if (index != -1) {
+      final room = _rooms[index];
+      _rooms[index] = room.copyWith(
+        lastMessage: message.content,
+        lastMessageTimestamp: message.timestamp,
+      );
+      
+      // Move room to top
+      final updatedRoom = _rooms.removeAt(index);
+      _rooms.insert(0, updatedRoom);
+      
+      notifyListeners();
+    }
+  }
 
   List<ChatRoom> get rooms => _rooms;
   bool get isLoading => _isLoading;
@@ -43,5 +76,11 @@ class RoomProvider extends ChangeNotifier {
       _rooms[index] = updatedRoom;
       notifyListeners();
     }
+  }
+
+  @override
+  void dispose() {
+    _messageSubscription?.cancel();
+    super.dispose();
   }
 }

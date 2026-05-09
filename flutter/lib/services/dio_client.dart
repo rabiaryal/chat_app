@@ -112,7 +112,7 @@ class AuthInterceptor extends Interceptor {
         baseUrl: baseUrl,
         connectTimeout: Duration(seconds: 10),
         receiveTimeout: Duration(seconds: 10),
-        validateStatus: (status) => status != null && status < 500,
+        validateStatus: (status) => status != null && status < 500 && status != 401,
       ));
 
       final response = await dio.post(
@@ -190,7 +190,7 @@ class DioClient {
         baseUrl: baseUrl,
         connectTimeout: Duration(seconds: 10),
         receiveTimeout: Duration(seconds: 10),
-        validateStatus: (status) => status != null && status < 500,
+        validateStatus: (status) => status != null && status < 500 && status != 401,
         headers: {
           'Content-Type': 'application/json',
         },

@@ -100,15 +100,12 @@ class _ChatListScreenState extends State<ChatListScreen> {
       _username = user.username;
       _currentUser = user;
 
-      // Load friends using FriendProvider
+      // Load data using Providers
       if (mounted) {
-        final friendProvider =
-            Provider.of<FriendProvider>(context, listen: false);
-        await friendProvider.loadFriends(refresh: true);
-        
-        final roomProvider =
-            Provider.of<RoomProvider>(context, listen: false);
-        await roomProvider.loadRooms();
+        await Future.wait([
+          Provider.of<FriendProvider>(context, listen: false).loadFriends(refresh: true),
+          Provider.of<RoomProvider>(context, listen: false).loadRooms(),
+        ]);
       }
 
       setState(() => _isLoading = false);
@@ -116,9 +113,18 @@ class _ChatListScreenState extends State<ChatListScreen> {
       if (mounted) {
         setState(() => _isLoading = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error loading friends: $e')),
+          SnackBar(content: Text('Error loading data: $e')),
         );
       }
+    }
+  }
+
+  Future<void> _handleRefresh() async {
+    if (mounted) {
+      await Future.wait([
+        Provider.of<FriendProvider>(context, listen: false).loadFriends(refresh: true),
+        Provider.of<RoomProvider>(context, listen: false).loadRooms(),
+      ]);
     }
   }
 
@@ -201,6 +207,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                       builder: (context) => UserProfileScreen(
                         user: _currentUser!,
                         onLogout: _logout,
+                        isCurrentUser: true,
                       ),
                     ),
                   ),
@@ -239,7 +246,9 @@ class _ChatListScreenState extends State<ChatListScreen> {
       ),
       body: _isLoading
           ? Center(child: CircularProgressIndicator())
-          : Consumer<FriendProvider>(
+          : RefreshIndicator(
+              onRefresh: _handleRefresh,
+              child: Consumer<FriendProvider>(
               builder: (context, friendProvider, child) {
                 List<dynamic> displayList = _searchQuery.isEmpty
                     ? friendProvider.friends
@@ -343,7 +352,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                                               roomId: room.id,
                                               roomName: room.name,
                                               userId: _userId ?? 0,
-                                              username: room.name,
+                                              username: _username,
                                               friendId: 0,
                                               isGroup: true,
                                             ),
@@ -397,114 +406,145 @@ class _ChatListScreenState extends State<ChatListScreen> {
                         ),
                       ),
                     ),
-                    Expanded(
-                      child: friendProvider.friends.isEmpty
-                          ? Center(
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(
-                                    Icons.people_outline,
-                                    size: 64,
-                                    color: Colors.grey[400],
+                    // Direct Messages Section
+                    Consumer<RoomProvider>(
+                      builder: (context, roomProvider, _) {
+                        final dmRooms = roomProvider.rooms
+                            .where((r) => r.roomType == 'DM')
+                            .toList();
+
+                        if (dmRooms.isEmpty) {
+                          return _buildEmptyFriends(friendProvider);
+                        }
+
+                        List<ChatRoom> filteredRooms = dmRooms;
+                        if (_searchQuery.isNotEmpty) {
+                          filteredRooms = dmRooms
+                              .where((r) => r.name
+                                  .toLowerCase()
+                                  .contains(_searchQuery.toLowerCase()))
+                              .toList();
+                        }
+
+                        return Expanded(
+                          child: ListView.builder(
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            itemCount: filteredRooms.length,
+                            itemBuilder: (context, index) {
+                              final room = filteredRooms[index];
+                              
+                              // Extract friend name from "User1 & User2"
+                              final displayName = room.name
+                                  .replaceAll(_username, '')
+                                  .replaceAll('&', '')
+                                  .trim();
+
+                              return ListTile(
+                                leading: CircleAvatar(
+                                  backgroundColor: Theme.of(context)
+                                      .primaryColor
+                                      .withOpacity(0.2),
+                                  child: Text(
+                                    displayName.isNotEmpty
+                                        ? displayName[0].toUpperCase()
+                                        : 'U',
+                                    style: TextStyle(
+                                        color: Theme.of(context).primaryColor),
                                   ),
-                                  SizedBox(height: 16),
-                                  Text('No friends yet'),
-                                  SizedBox(height: 24),
-                                  ElevatedButton.icon(
-                                    onPressed: () => showAddFriendBottomSheet(
-                                      context,
-                                      onSearchTap: () => Navigator.push(
-                                        context,
-                                        MaterialPageRoute(
-                                            builder: (_) =>
-                                                FriendsListScreen()),
-                                      ),
-                                      onRequestsTap: () => Navigator.push(
-                                        context,
-                                        MaterialPageRoute(
-                                            builder: (_) =>
-                                                FriendsListScreen()),
-                                      ),
+                                ),
+                                title: Text(displayName,
+                                    style: const TextStyle(
+                                        fontWeight: FontWeight.w600)),
+                                subtitle: Text(
+                                  room.lastMessage ?? 'No messages yet',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: Colors.grey[600],
+                                    fontSize: 13,
+                                  ),
+                                ),
+                                trailing: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  crossAxisAlignment: CrossAxisAlignment.end,
+                                  children: [
+                                    Text(
+                                      _formatLastSeen(room.lastMessageTimestamp),
+                                      style: TextStyle(
+                                          color: Colors.grey[500],
+                                          fontSize: 11),
                                     ),
-                                    icon: Icon(Icons.add),
-                                    label: Text('Find Friends'),
-                                  ),
-                                ],
-                              ),
-                            )
-                          : displayList.isEmpty
-                              ? Center(
-                                  child: Text('No friends match your search'),
-                                )
-                              : ListView.builder(
-                                  controller: _scrollController,
-                                  itemCount: displayList.length + (friendProvider.isLoadingMore ? 1 : 0),
-                                  itemBuilder: (context, index) {
-                                    if (index == displayList.length) {
-                                      return Padding(
-                                        padding: const EdgeInsets.all(16.0),
-                                        child: Center(child: CircularProgressIndicator()),
-                                      );
-                                    }
-                                    final friend = displayList[index];
-                                    return ListTile(
-                                      leading: Stack(
-                                        children: [
-                                          CircleAvatar(
-                                            backgroundColor: Theme.of(context).primaryColor.withOpacity(0.2),
-                                            child: Text(
-                                              friend.displayName.isNotEmpty ? friend.displayName[0].toUpperCase() : 'U',
-                                              style: TextStyle(color: Theme.of(context).primaryColor),
-                                            ),
-                                          ),
-                                          if (friend.isOnline)
-                                            Positioned(
-                                              right: 0,
-                                              bottom: 0,
-                                              child: Container(
-                                                width: 12,
-                                                height: 12,
-                                                decoration: BoxDecoration(
-                                                  color: Colors.green,
-                                                  shape: BoxShape.circle,
-                                                  border: Border.all(color: Theme.of(context).scaffoldBackgroundColor, width: 2),
-                                                ),
-                                              ),
-                                            ),
-                                        ],
-                                      ),
-                                      title: Text(friend.displayName),
-                                      subtitle: Text(
-                                        friend.isOnline 
-                                            ? 'Online' 
-                                            : (friend.lastSeen != null 
-                                                ? 'Last seen: ${_formatLastSeen(friend.lastSeen!)}' 
-                                                : 'Offline'),
-                                        style: TextStyle(
-                                          color: friend.isOnline
-                                              ? Colors.green
-                                              : Colors.grey,
-                                          fontSize: 12,
+                                    const SizedBox(height: 4),
+                                    const Icon(Icons.chevron_right,
+                                        size: 16, color: Colors.grey),
+                                  ],
+                                ),
+                                onTap: () {
+                                  final chatProvider = Provider.of<ChatProvider>(
+                                      context,
+                                      listen: false);
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (context) =>
+                                          ChangeNotifierProvider.value(
+                                        value: chatProvider,
+                                        child: ChatScreen(
+                                          roomId: room.id,
+                                          roomName: displayName,
+                                          userId: _userId ?? 0,
+                                          username: _username,
+                                          friendId: 0,
                                         ),
                                       ),
-                                      trailing: Icon(Icons.chevron_right),
-                                      onTap: () => _startChat(
-                                          friend.id, friend.displayName),
-                                    );
-                                  },
-                                ),
+                                    ),
+                                  );
+                                },
+                              );
+                            },
+                          ),
+                        );
+                      },
                     ),
                   ],
                 );
               },
             ),
+          ),
       floatingActionButton: FloatingActionButton(
         onPressed: () => Navigator.push(
           context,
           MaterialPageRoute(builder: (_) => FriendsListScreen()),
         ),
-        child: Icon(Icons.add),
+        child: const Icon(Icons.add),
+      ),
+    );
+  }
+
+  Widget _buildEmptyFriends(FriendProvider friendProvider) {
+    return Expanded(
+      child: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.people_outline,
+              size: 64,
+              color: Colors.grey[400],
+            ),
+            const SizedBox(height: 16),
+            const Text('No conversations yet'),
+            const SizedBox(height: 24),
+            ElevatedButton.icon(
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => FriendsListScreen()),
+              ),
+              icon: const Icon(Icons.message),
+              label: const Text('Start Chatting'),
+            ),
+          ],
+        ),
       ),
     );
   }
