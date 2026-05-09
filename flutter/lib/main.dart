@@ -119,8 +119,19 @@ class _MyAppState extends State<MyApp> {
             title: 'Chat App',
             debugShowCheckedModeBanner: false,
             theme: ThemeData(
-              primarySwatch: Colors.blue,
+              primaryColor: const Color(0xFF6C5CE7),
+              colorScheme: ColorScheme.fromSeed(
+                seedColor: const Color(0xFF6C5CE7),
+                primary: const Color(0xFF6C5CE7),
+                secondary: const Color(0xFFA29BFE),
+              ),
               useMaterial3: true,
+              scaffoldBackgroundColor: Colors.grey[50],
+              appBarTheme: const AppBarTheme(
+                backgroundColor: Colors.transparent,
+                elevation: 0,
+                centerTitle: false,
+              ),
             ),
             darkTheme: ThemeData.dark(
               useMaterial3: true,

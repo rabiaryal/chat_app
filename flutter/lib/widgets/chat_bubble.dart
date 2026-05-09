@@ -170,14 +170,14 @@ class ChatBubble extends StatelessWidget {
         );
       case MessageStatus.delivered:
         return Icon(
-          Icons.done,
+          Icons.done_all,
           size: 14,
           color: Colors.grey[400],
         );
       case MessageStatus.read:
         return Icon(
           Icons.done_all,
-          size: 14,
+          size: 16,
           color: Colors.blue[400],
         );
       case MessageStatus.streaming:

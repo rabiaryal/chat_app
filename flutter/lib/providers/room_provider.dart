@@ -34,6 +34,7 @@ class RoomProvider extends ChangeNotifier {
       _rooms[index] = room.copyWith(
         lastMessage: message.content,
         lastMessageTimestamp: message.timestamp,
+        lastMessageSenderId: message.userId,
       );
       
       // Move room to top

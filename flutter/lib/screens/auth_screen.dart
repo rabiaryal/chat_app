@@ -1,6 +1,7 @@
 /// Authentication Screen (Login/Register)
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
+import '../utils/snackbar_utils.dart';
 
 class AuthScreen extends StatefulWidget {
   @override
@@ -300,9 +301,7 @@ class _RegisterPageState extends State<RegisterPage> {
       if (!mounted) return;
 
       // Tokens are saved by ApiService; navigate directly to chat list
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Registration successful! Logging you in...')),
-      );
+      SnackbarUtils.showSuccess(context, 'Registration successful! Logging you in...');
 
       Navigator.of(context).pushReplacementNamed('/chat-list', arguments: {
         'username': authResponse.user['username'],

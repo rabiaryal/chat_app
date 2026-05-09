@@ -6,6 +6,7 @@ import '../providers/friend_provider.dart';
 import '../services/chat_controller.dart';
 import 'chat_screen.dart';
 import '../providers/chat_provider.dart';
+import '../utils/snackbar_utils.dart';
 
 class FriendsListScreen extends StatefulWidget {
   @override
@@ -113,9 +114,7 @@ class _FriendsListScreenState extends State<FriendsListScreen>
         ),
       );
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error starting chat: $e')),
-      );
+      SnackbarUtils.showError(context, 'Error starting chat: $e');
     }
   }
 
@@ -275,13 +274,7 @@ class _FriendsListScreenState extends State<FriendsListScreen>
                                     final success = await friendProvider
                                         .sendFriendRequest(user.id);
                                     if (success && mounted) {
-                                      ScaffoldMessenger.of(context)
-                                          .showSnackBar(
-                                        SnackBar(
-                                          content: Text(
-                                              'Friend request sent to ${user.displayName}'),
-                                        ),
-                                      );
+                                      SnackbarUtils.showSuccess(context, 'Friend request sent to ${user.displayName}');
                                     }
                                   },
                                   icon: Icon(Icons.person_add, size: 16),
@@ -397,11 +390,7 @@ class _FriendsListScreenState extends State<FriendsListScreen>
                                 final success = await friendProvider
                                     .rejectFriendRequest(request.id);
                                 if (success && mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text('Friend request rejected'),
-                                    ),
-                                  );
+                                  SnackbarUtils.showInfo(context, 'Friend request rejected');
                                 }
                               },
                             ),

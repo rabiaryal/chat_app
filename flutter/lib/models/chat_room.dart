@@ -15,6 +15,7 @@ class ChatRoom {
 
   final String? lastMessage;
   final DateTime lastMessageTimestamp;
+  final int? lastMessageSenderId;
 
   ChatRoom({
     required this.id,
@@ -30,6 +31,7 @@ class ChatRoom {
     required this.updatedAt,
     this.lastMessage,
     required this.lastMessageTimestamp,
+    this.lastMessageSenderId,
   });
 
   factory ChatRoom.fromJson(Map<String, dynamic> json) {
@@ -49,6 +51,7 @@ class ChatRoom {
       lastMessageTimestamp: json['last_message_timestamp'] != null
           ? DateTime.parse(json['last_message_timestamp'] as String)
           : DateTime.parse(json['updated_at'] as String),
+      lastMessageSenderId: json['last_message_sender_id'] as int?,
     );
   }
 
@@ -66,6 +69,7 @@ class ChatRoom {
         'updated_at': updatedAt.toIso8601String(),
         'last_message': lastMessage,
         'last_message_timestamp': lastMessageTimestamp.toIso8601String(),
+        'last_message_sender_id': lastMessageSenderId,
       };
 
   ChatRoom copyWith({
@@ -82,6 +86,7 @@ class ChatRoom {
     DateTime? updatedAt,
     String? lastMessage,
     DateTime? lastMessageTimestamp,
+    int? lastMessageSenderId,
   }) {
     return ChatRoom(
       id: id ?? this.id,
@@ -97,6 +102,7 @@ class ChatRoom {
       updatedAt: updatedAt ?? this.updatedAt,
       lastMessage: lastMessage ?? this.lastMessage,
       lastMessageTimestamp: lastMessageTimestamp ?? this.lastMessageTimestamp,
+      lastMessageSenderId: lastMessageSenderId ?? this.lastMessageSenderId,
     );
   }
 

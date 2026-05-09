@@ -139,6 +139,12 @@ class ChatService {
     required String roomId,
     String? token,
   }) async {
+    // If already connected to this room, do nothing
+    if (_isConnected && _currentRoomId == roomId && _webSocketChannel != null) {
+      print('ℹ WebSocket already connected to room: $roomId');
+      return;
+    }
+
     try {
       // Disconnect existing connection if any to prevent duplicate listeners
       await disconnectWebSocket();
@@ -499,7 +505,9 @@ class ChatService {
     _isConnected = false;
     _connectionStreamController?.add(false);
     _messageStreamController?.addError('WebSocket error: $error');
-    _scheduleReconnection(roomId, null);
+    if (_currentRoomId == roomId) {
+      _scheduleReconnection(roomId, null);
+    }
   }
 
   /// Handle WebSocket disconnection
@@ -507,7 +515,9 @@ class ChatService {
     print('⚠ WebSocket disconnected');
     _isConnected = false;
     _connectionStreamController?.add(false);
-    _scheduleReconnection(roomId, null);
+    if (_currentRoomId == roomId) {
+      _scheduleReconnection(roomId, null);
+    }
   }
 
   /// Schedule automatic reconnection with exponential backoff

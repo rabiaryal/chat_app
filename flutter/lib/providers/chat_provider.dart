@@ -63,6 +63,12 @@ class ChatProvider extends ChangeNotifier {
     required int userId,
     required String username,
   }) async {
+    // Prevent redundant initialization for the same room
+    if (_currentRoomId == roomId && _isConnected && _messages.isNotEmpty) {
+      print('ℹ ChatProvider already initialized for room: $roomId');
+      return;
+    }
+
     _currentRoomId = roomId;
     _currentUserId = userId;
     _currentUsername = username;
@@ -211,23 +217,29 @@ class ChatProvider extends ChangeNotifier {
 
     // Check if this is a "read receipt" event for an existing message
     if (message.status == MessageStatus.read) {
+      print('📖 Received read receipt for message: ${message.id}');
       final existingIndex = _messages.indexWhere((m) => m.id == message.id);
       if (existingIndex != -1) {
-        _messages[existingIndex] = _messages[existingIndex].copyWith(
-          status: MessageStatus.read,
-        );
-        
-        // Update Hive cache
-        if (_currentRoomId != null) {
-          unawaited(
-            _persistenceService.updateMessageId(
-              _currentRoomId!,
-              message.id,
-              MessageModel.fromChatMessage(_messages[existingIndex]),
-            ),
+        if (_messages[existingIndex].status != MessageStatus.read) {
+          _messages[existingIndex] = _messages[existingIndex].copyWith(
+            status: MessageStatus.read,
           );
+          
+          // Update Hive cache
+          if (_currentRoomId != null) {
+            unawaited(
+              _persistenceService.updateMessageId(
+                _currentRoomId!,
+                message.id,
+                MessageModel.fromChatMessage(_messages[existingIndex]),
+              ),
+            );
+          }
+          _notifySafely();
+          print('✓ Updated message ${message.id} status to READ');
         }
-        _notifySafely();
+      } else {
+        print('⚠ Message ${message.id} not found in local list for read receipt');
       }
       return;
     }
