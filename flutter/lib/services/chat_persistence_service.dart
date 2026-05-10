@@ -117,4 +117,17 @@ class ChatPersistenceService {
     }
     await box.put(updatedMessage.id, updatedMessage.toJson());
   }
+
+  /// Mark a message as read in the local Hive box
+  Future<void> markMessageAsRead(String roomId, String messageId) async {
+    final box = await _openRoomBox(roomId);
+    final data = box.get(messageId);
+    if (data != null) {
+      final json = Map<String, dynamic>.from(data);
+      json['is_seen'] = true;
+      json['is_read'] = true;
+      json['status'] = 'read';
+      await box.put(messageId, json);
+    }
+  }
 }

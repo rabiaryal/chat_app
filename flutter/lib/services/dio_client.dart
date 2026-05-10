@@ -20,11 +20,20 @@ class AuthInterceptor extends Interceptor {
     RequestOptions options,
     RequestInterceptorHandler handler,
   ) async {
-    // Add access token to all requests
-    final accessToken = tokenStorage.getAccessToken();
-    if (accessToken != null) {
-      options.headers['Authorization'] = 'Bearer $accessToken';
-      print('🔐 Token added to request: ${options.path}');
+    // Skip adding token for auth endpoints (login and register)
+    // If we send an expired token to the login endpoint, the backend will return 401
+    // before checking the credentials.
+    final bool isAuthRequest = options.path.contains('/auth/login/') ||
+        options.path.contains('/auth/register/');
+
+    if (!isAuthRequest) {
+      final accessToken = tokenStorage.getAccessToken();
+      if (accessToken != null) {
+        options.headers['Authorization'] = 'Bearer $accessToken';
+        print('🔐 Token added to request: ${options.path}');
+      }
+    } else {
+      print('🔐 Auth request detected, skipping token injection: ${options.path}');
     }
 
     options.headers['Content-Type'] = 'application/json';

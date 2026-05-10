@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../models/chat_room.dart';
 import '../../providers/chat_provider.dart';
-import '../../screens/chat_screen.dart';
+import '../../providers/room_provider.dart';
+import '../../screens/chat_screen.dart';  
 
 class ChatCard extends StatelessWidget {
   final ChatRoom room;
@@ -21,16 +22,12 @@ class ChatCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isGroup = room.roomType == 'GROUP';
-    String displayName = room.name;
-    if (!isGroup) {
-      displayName = room.name
-          .replaceAll(currentUsername, '')
-          .replaceAll('&', '')
-          .trim();
-    }
+    // Use otherParticipantName if available, otherwise fallback to room.name
+    final String displayName = isGroup 
+        ? room.name 
+        : (room.otherParticipantName.isNotEmpty ? room.otherParticipantName : room.name);
 
-    final bool hasNewMessage =
-        room.lastMessageSenderId != null && room.lastMessageSenderId != currentUserId;
+    final bool hasNewMessage = room.unreadCount > 0;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -49,6 +46,11 @@ class ChatCard extends StatelessWidget {
         child: ListTile(
           onTap: () {
             final chatProvider = Provider.of<ChatProvider>(context, listen: false);
+            final roomProvider = Provider.of<RoomProvider>(context, listen: false);
+            
+            // Mark as read locally in the room list immediately
+            roomProvider.markRoomAsRead(room.id);
+
             Navigator.push(
               context,
               MaterialPageRoute(
@@ -59,7 +61,7 @@ class ChatCard extends StatelessWidget {
                     roomName: displayName,
                     userId: currentUserId ?? 0,
                     username: currentUsername,
-                    friendId: 0,
+                    friendId: isGroup ? 0 : (room.otherParticipantId ?? 0),
                     isGroup: isGroup,
                   ),
                 ),
@@ -77,7 +79,8 @@ class ChatCard extends StatelessWidget {
             child: isGroup
                 ? const Icon(Icons.groups, color: Colors.blue)
                 : Center(
-                    child: Text(displayName[0].toUpperCase(),
+                    child: Text(
+                        displayName.trim().isNotEmpty ? displayName.trim()[0].toUpperCase() : '?',
                         style: const TextStyle(
                             fontWeight: FontWeight.bold, fontSize: 18))),
           ),
@@ -116,7 +119,9 @@ class ChatCard extends StatelessWidget {
               children: [
                 Expanded(
                   child: Text(
-                    room.lastMessage ?? 'No messages yet',
+                    isGroup && room.lastMessageSenderId != null
+                        ? '${room.lastMessageSenderId == currentUserId ? "You" : room.lastMessageSenderId}: ${room.lastMessage}'
+                        : (room.lastMessage ?? 'No messages yet'),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
@@ -127,11 +132,11 @@ class ChatCard extends StatelessWidget {
                 ),
                 if (hasNewMessage)
                   Container(
-                    padding: const EdgeInsets.all(6),
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     decoration:
-                        BoxDecoration(color: primaryColor, shape: BoxShape.circle),
-                    child: const Text('1',
-                        style: TextStyle(
+                        BoxDecoration(color: primaryColor, borderRadius: BorderRadius.circular(10)),
+                    child: Text('${room.unreadCount}',
+                        style: const TextStyle(
                             color: Colors.white,
                             fontSize: 10,
                             fontWeight: FontWeight.bold)),

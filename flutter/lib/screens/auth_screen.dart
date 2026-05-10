@@ -1,6 +1,7 @@
 /// Authentication Screen (Login/Register)
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
+import '../models/user.dart';
 import '../utils/snackbar_utils.dart';
 
 class AuthScreen extends StatefulWidget {
@@ -94,7 +95,7 @@ class _LoginPageState extends State<LoginPage> {
 
     try {
       final apiService = ApiService(baseUrl: 'http://192.168.1.65:8000');
-      final response = await apiService.login(
+      final AuthResponse response = await apiService.login(
         username: _usernameController.text.trim(),
         password: _passwordController.text.trim(),
       );
@@ -103,8 +104,8 @@ class _LoginPageState extends State<LoginPage> {
 
       // Navigate to chat list
       Navigator.of(context).pushReplacementNamed('/chat-list', arguments: {
-        'username': response.user['username'],
-        'userId': response.user['id'],
+        'username': response.user.username,
+        'userId': response.user.id,
       });
     } catch (e) {
       setState(() {
@@ -292,7 +293,7 @@ class _RegisterPageState extends State<RegisterPage> {
 
     try {
       final apiService = ApiService(baseUrl: 'http://192.168.1.65:8000');
-      final authResponse = await apiService.register(
+      final AuthResponse authResponse = await apiService.register(
         username: _usernameController.text.trim(),
         email: _emailController.text.trim(),
         password: _passwordController.text.trim(),
@@ -303,9 +304,9 @@ class _RegisterPageState extends State<RegisterPage> {
       // Tokens are saved by ApiService; navigate directly to chat list
       SnackbarUtils.showSuccess(context, 'Registration successful! Logging you in...');
 
-      Navigator.of(context).pushReplacementNamed('/chat-list', arguments: {
-        'username': authResponse.user['username'],
-        'userId': authResponse.user['id'],
+      Navigator.of(context).pushReplacementNamed('/suggested-friends', arguments: {
+        'username': authResponse.user.username,
+        'userId': authResponse.user.id,
       });
     } catch (e) {
       setState(() {

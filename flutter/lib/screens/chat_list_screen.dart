@@ -1,167 +1,106 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../services/api_service.dart';
-import '../services/chat_controller.dart';
-import '../providers/friend_provider.dart';
 import '../providers/room_provider.dart';
-import '../models/user.dart';
+import '../providers/chat_provider.dart';
 import '../models/chat_room.dart';
-
-// New Modular Widgets
-import '../widgets/dashboard/chat_app_bar.dart';
-import '../widgets/dashboard/user_status_bar.dart';
-import '../widgets/dashboard/chat_tabs.dart';
+import '../models/user.dart';
+import '../services/api_service.dart';
 import '../widgets/dashboard/chat_card.dart';
+import '../widgets/dashboard/chat_app_bar.dart';
 import '../widgets/dashboard/dashboard_bottom_nav.dart';
-import '../utils/snackbar_utils.dart';
+import '../widgets/chat_bubble.dart';
+import '../providers/auth_provider.dart';
+import 'suggested_friends_screen.dart';
+import 'chat_screen.dart';
+import 'create_group_screen.dart';
 
 class ChatListScreen extends StatefulWidget {
+  const ChatListScreen({Key? key}) : super(key: key);
+
   @override
-  State<ChatListScreen> createState() => _ChatListScreenState();
+  _ChatListScreenState createState() => _ChatListScreenState();
 }
 
 class _ChatListScreenState extends State<ChatListScreen> {
-  late ApiService _apiService;
-  late ChatController _chatController;
-  int? _userId;
-  String _username = '';
-  User? _currentUser;
-  bool _isLoading = false;
-  String _searchQuery = '';
   int _selectedTabIndex = 0;
   int _selectedBottomIndex = 0;
-  final ScrollController _scrollController = ScrollController();
-
-  final List<String> _tabs = ['All', 'Unread', 'Groups', 'Favorites'];
+  String _searchQuery = '';
+  User? _currentUser;
+  bool _isLoading = true;
+  int? _userId;
+  String _username = '';
 
   @override
   void initState() {
     super.initState();
-    _apiService = ApiService();
-    _chatController = ChatController(apiService: _apiService);
-    
-    _scrollController.addListener(() {
-      if (_scrollController.position.pixels >= _scrollController.position.maxScrollExtent - 200) {
-        if (!mounted) return;
-        final friendProvider = Provider.of<FriendProvider>(context, listen: false);
-        if (!friendProvider.isLoadingMore && friendProvider.hasMoreFriends && _searchQuery.isEmpty) {
-          friendProvider.loadFriends(refresh: false);
-        }
-      }
-    });
-    
-    _initializeAndLoad();
+    // Use microtask to avoid "setState during build" error
+    Future.microtask(() => _loadInitialData());
   }
 
-  @override
-  void dispose() {
-    _scrollController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _initializeAndLoad() async {
+  Future<void> _loadInitialData() async {
     setState(() => _isLoading = true);
+    final roomProvider = Provider.of<RoomProvider>(context, listen: false);
+    final apiService = ApiService();
 
     try {
-      final sessionRestored = await _apiService.restoreSession();
+      await roomProvider.loadRooms();
+      final user = await apiService.getCurrentUser();
+      setState(() {
+        _currentUser = user;
+        _userId = user.id;
+        _username = user.username;
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() => _isLoading = false);
+      print('✗ Failed to load data: $e');
+    }
+  }
 
-      if (!sessionRestored) {
-        if (mounted) {
-          Navigator.of(context).pushReplacementNamed('/auth');
-        }
-        return;
-      }
-
+  void _logout() async {
+    try {
+      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+      await authProvider.logout();
       if (mounted) {
-        await _loadUserData();
+        Navigator.of(context).pushReplacementNamed('/auth');
       }
     } catch (e) {
+      print('✗ Logout failed: $e');
       if (mounted) {
-        setState(() => _isLoading = false);
-        SnackbarUtils.showError(context, 'Session error: $e');
         Navigator.of(context).pushReplacementNamed('/auth');
       }
     }
   }
 
-  Future<void> _loadUserData() async {
-    setState(() => _isLoading = true);
-
-    try {
-      final user = await _apiService.getCurrentUser();
-      _userId = user.id;
-      _username = user.username;
-      _currentUser = user;
-
-      if (mounted) {
-        await Future.wait([
-          Provider.of<FriendProvider>(context, listen: false).loadFriends(refresh: true),
-          Provider.of<RoomProvider>(context, listen: false).loadRooms(),
-        ]);
-      }
-
-      setState(() => _isLoading = false);
-    } catch (e) {
-      if (mounted) {
-        setState(() => _isLoading = false);
-        SnackbarUtils.showError(context, 'Error loading data: $e');
-      }
-    }
-  }
-
-  Future<void> _handleRefresh() async {
-    if (mounted) {
-      await Future.wait([
-        Provider.of<FriendProvider>(context, listen: false).loadFriends(refresh: true),
-        Provider.of<RoomProvider>(context, listen: false).loadRooms(),
-      ]);
-    }
-  }
-
-  Future<void> _logout() async {
-    try {
-      await _apiService.logout();
-    } catch (e) {
-      print('Logout error: $e');
-    }
-
-    if (mounted) {
-      Navigator.of(context).pushReplacementNamed('/auth');
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
-    const primaryColor = Color(0xFF6C5CE7);
+    final theme = Theme.of(context);
+    final primaryColor = theme.primaryColor;
 
     return Scaffold(
       backgroundColor: Colors.grey[50],
-      appBar: ChatAppBar(primaryColor: primaryColor),
+      appBar: ChatAppBar(
+        primaryColor: primaryColor,
+        currentUser: _currentUser,
+        onLogout: _logout,
+      ),
       bottomNavigationBar: DashboardBottomNav(
         selectedIndex: _selectedBottomIndex,
         primaryColor: primaryColor,
         currentUser: _currentUser,
-        onLogout: _logout,
         onItemSelected: (index) => setState(() => _selectedBottomIndex = index),
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
-              onRefresh: _handleRefresh,
+              onRefresh: () => Provider.of<RoomProvider>(context, listen: false).loadRooms(),
               child: SingleChildScrollView(
                 physics: const AlwaysScrollableScrollPhysics(),
                 child: Column(
                   children: [
                     _buildSearchBar(),
-                    UserStatusBar(primaryColor: primaryColor),
-                    const SizedBox(height: 16),
-                    ChatTabs(
-                      tabs: _tabs,
-                      selectedTabIndex: _selectedTabIndex,
-                      primaryColor: primaryColor,
-                      onTabSelected: (index) => setState(() => _selectedTabIndex = index),
-                    ),
-                    const SizedBox(height: 16),
+                    _buildHorizontalList(primaryColor),
+                    _buildTabs(primaryColor),
                     _buildChatList(primaryColor),
                   ],
                 ),
@@ -170,18 +109,204 @@ class _ChatListScreenState extends State<ChatListScreen> {
     );
   }
 
+  Widget _buildHorizontalList(Color primaryColor) {
+    return Consumer<RoomProvider>(
+      builder: (context, roomProvider, _) {
+        // Show all active rooms (Groups and DMs) in the top circle list
+        final rooms = roomProvider.rooms;
+        
+        return Container(
+          height: 110,
+          margin: const EdgeInsets.symmetric(vertical: 10),
+          child: ListView.builder(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            itemCount: rooms.length + 1,
+            itemBuilder: (context, index) {
+              if (index == 0) {
+                // New Group Button
+                return Padding(
+                  padding: const EdgeInsets.only(right: 15),
+                  child: Column(
+                    children: [
+                      GestureDetector(
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => CreateGroupScreen()),
+                        ),
+                        child: Container(
+                          width: 65,
+                          height: 65,
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.grey[200]!),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.02),
+                                blurRadius: 10,
+                                offset: const Offset(0, 4),
+                              ),
+                            ],
+                          ),
+                          child: Icon(Icons.add, color: primaryColor, size: 30),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      const Text('New', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                    ],
+                  ),
+                );
+              }
+
+              final room = rooms[index - 1];
+              final isGroup = room.roomType == 'GROUP';
+              final String displayName = isGroup 
+                  ? room.name 
+                  : (room.otherParticipantName.isNotEmpty ? room.otherParticipantName : room.name);
+
+              return Padding(
+                padding: const EdgeInsets.only(right: 15),
+                child: Column(
+                  children: [
+                    GestureDetector(
+                      onTap: () {
+                        final chatProvider = Provider.of<ChatProvider>(context, listen: false);
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => ChangeNotifierProvider.value(
+                              value: chatProvider,
+                              child: ChatScreen(
+                                roomId: room.id,
+                                roomName: displayName,
+                                userId: _userId ?? 0,
+                                username: _username,
+                                friendId: isGroup ? 0 : (room.otherParticipantId ?? 0),
+                                isGroup: isGroup,
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                      child: Container(
+                        width: 65,
+                        height: 65,
+                        decoration: BoxDecoration(
+                          color: isGroup ? primaryColor.withOpacity(0.1) : Colors.grey[100],
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 2),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.05),
+                              blurRadius: 10,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: ClipOval(
+                          child: isGroup 
+                            ? Center(
+                                child: Text(
+                                  displayName.trim().isNotEmpty ? displayName.trim()[0].toUpperCase() : '?',
+                                  style: TextStyle(
+                                    color: primaryColor,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 20,
+                                  ),
+                                ),
+                              )
+                            : (room.otherParticipantAvatar != null 
+                                ? Image.network(room.otherParticipantAvatar!, fit: BoxFit.cover)
+                                : Center(
+                                    child: Text(
+                                      displayName.trim().isNotEmpty ? displayName.trim()[0].toUpperCase() : '?',
+                                      style: TextStyle(
+                                        color: Colors.grey[700],
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 20,
+                                      ),
+                                    ),
+                                  )),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      width: 65,
+                      child: Text(
+                        displayName,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildTabs(Color primaryColor) {
+    final tabs = ['All', 'Unread', 'Groups', 'Favorites'];
+    return Container(
+      height: 45,
+      margin: const EdgeInsets.symmetric(vertical: 10),
+      child: ListView.builder(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        itemCount: tabs.length,
+        itemBuilder: (context, index) {
+          final isSelected = _selectedTabIndex == index;
+          return GestureDetector(
+            onTap: () => setState(() => _selectedTabIndex = index),
+            child: Container(
+              margin: const EdgeInsets.only(right: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              decoration: BoxDecoration(
+                color: isSelected ? primaryColor : Colors.white,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: isSelected ? primaryColor : Colors.grey[200]!),
+              ),
+              child: Center(
+                child: Text(
+                  tabs[index],
+                  style: TextStyle(
+                    color: isSelected ? Colors.white : Colors.grey[600],
+                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   Widget _buildSearchBar() {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Container(
         decoration: BoxDecoration(
-          color: Colors.grey[100],
-          borderRadius: BorderRadius.circular(16),
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(15),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.02),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
         ),
         child: TextField(
           onChanged: (value) => setState(() => _searchQuery = value),
           decoration: const InputDecoration(
-            hintText: 'Search messages or users',
+            hintText: 'Search chats...',
             prefixIcon: Icon(Icons.search, color: Colors.grey),
             border: InputBorder.none,
             contentPadding: EdgeInsets.symmetric(vertical: 15),
@@ -198,7 +323,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
         
         // Apply tab filtering
         if (_selectedTabIndex == 1) { // Unread
-          rooms = rooms.where((r) => r.lastMessageSenderId != null && r.lastMessageSenderId != _userId).toList();
+          rooms = rooms.where((r) => r.unreadCount > 0).toList();
         } else if (_selectedTabIndex == 2) { // Groups
           rooms = rooms.where((r) => r.roomType == 'GROUP').toList();
         } else if (_selectedTabIndex == 3) { // Favorites
@@ -208,7 +333,24 @@ class _ChatListScreenState extends State<ChatListScreen> {
         if (_searchQuery.isNotEmpty) {
           rooms = rooms.where((r) => r.name.toLowerCase().contains(_searchQuery.toLowerCase())).toList();
         }
-        
+
+        if (rooms.isEmpty) {
+          return Padding(
+            padding: const EdgeInsets.only(top: 100),
+            child: EmptyChat(
+              title: "You haven't any friends as of now",
+              subtitle: "Add more people to chat and start sharing your moments!",
+              actionLabel: "Find People",
+              onAction: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const SuggestedFriendsScreen()),
+                );
+              },
+            ),
+          );
+        }
+
         return ListView.builder(
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),

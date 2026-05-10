@@ -930,27 +930,6 @@ class ApiService {
   }
 }
 
-/// Auth Response model
-class AuthResponse {
-  final String accessToken;
-  final String refreshToken;
-  final Map<String, dynamic> user;
-
-  AuthResponse({
-    required this.accessToken,
-    required this.refreshToken,
-    required this.user,
-  });
-
-  factory AuthResponse.fromJson(Map<String, dynamic> json) {
-    return AuthResponse(
-      accessToken: json['access'] ?? json['access_token'] ?? '',
-      refreshToken: json['refresh'] ?? json['refresh_token'] ?? '',
-      user: json['user'] ?? {},
-    );
-  }
-}
-
 class SessionExpiredException implements Exception {
   final String message;
 

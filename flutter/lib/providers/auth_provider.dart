@@ -80,7 +80,7 @@ class AuthProvider extends ChangeNotifier {
         firstName: firstName,
         lastName: lastName,
       );
-      _currentUser = User.fromJson(authResponse.user);
+      _currentUser = authResponse.user;
       _isAuthenticated = true;
       _isAuthenticating = false;
       notifyListeners();
@@ -109,7 +109,7 @@ class AuthProvider extends ChangeNotifier {
         username: username,
         password: password,
       );
-      _currentUser = User.fromJson(authResponse.user);
+      _currentUser = authResponse.user;
       _isAuthenticated = true;
       _isAuthenticating = false;
       notifyListeners();

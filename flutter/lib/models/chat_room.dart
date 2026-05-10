@@ -3,11 +3,10 @@ class ChatRoom {
   final String id;
   final String name;
   final String description;
-  final String roomType; // 'GROUP' or 'DIRECT'
+  final String roomType; // 'GROUP' or 'DM'
   final int creatorId;
   final String creatorUsername;
-  final List<dynamic>
-      participants; // Can contain full User objects or just user IDs
+  final List<dynamic> participants;
   final int participantsCount;
   final bool isActive;
   final DateTime createdAt;
@@ -16,6 +15,12 @@ class ChatRoom {
   final String? lastMessage;
   final DateTime lastMessageTimestamp;
   final int? lastMessageSenderId;
+  final int unreadCount;
+
+  // New fields for DMs
+  final String otherParticipantName;
+  final int? otherParticipantId;
+  final String? otherParticipantAvatar;
 
   ChatRoom({
     required this.id,
@@ -32,6 +37,10 @@ class ChatRoom {
     this.lastMessage,
     required this.lastMessageTimestamp,
     this.lastMessageSenderId,
+    this.unreadCount = 0,
+    this.otherParticipantName = '',
+    this.otherParticipantId,
+    this.otherParticipantAvatar,
   });
 
   factory ChatRoom.fromJson(Map<String, dynamic> json) {
@@ -52,6 +61,10 @@ class ChatRoom {
           ? DateTime.parse(json['last_message_timestamp'] as String)
           : DateTime.parse(json['updated_at'] as String),
       lastMessageSenderId: json['last_message_sender_id'] as int?,
+      unreadCount: json['unread_count'] as int? ?? 0,
+      otherParticipantName: json['other_participant_name'] as String? ?? '',
+      otherParticipantId: json['other_participant_id'] as int?,
+      otherParticipantAvatar: json['other_participant_avatar'] as String?,
     );
   }
 
@@ -70,6 +83,10 @@ class ChatRoom {
         'last_message': lastMessage,
         'last_message_timestamp': lastMessageTimestamp.toIso8601String(),
         'last_message_sender_id': lastMessageSenderId,
+        'unread_count': unreadCount,
+        'other_participant_name': otherParticipantName,
+        'other_participant_id': otherParticipantId,
+        'other_participant_avatar': otherParticipantAvatar,
       };
 
   ChatRoom copyWith({
@@ -87,6 +104,10 @@ class ChatRoom {
     String? lastMessage,
     DateTime? lastMessageTimestamp,
     int? lastMessageSenderId,
+    int? unreadCount,
+    String? otherParticipantName,
+    int? otherParticipantId,
+    String? otherParticipantAvatar,
   }) {
     return ChatRoom(
       id: id ?? this.id,
@@ -103,6 +124,10 @@ class ChatRoom {
       lastMessage: lastMessage ?? this.lastMessage,
       lastMessageTimestamp: lastMessageTimestamp ?? this.lastMessageTimestamp,
       lastMessageSenderId: lastMessageSenderId ?? this.lastMessageSenderId,
+      unreadCount: unreadCount ?? this.unreadCount,
+      otherParticipantName: otherParticipantName ?? this.otherParticipantName,
+      otherParticipantId: otherParticipantId ?? this.otherParticipantId,
+      otherParticipantAvatar: otherParticipantAvatar ?? this.otherParticipantAvatar,
     );
   }
 

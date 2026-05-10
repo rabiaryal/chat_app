@@ -12,6 +12,7 @@ import 'providers/friend_provider.dart';
 import 'screens/auth_screen.dart';
 import 'screens/chat_list_screen.dart';
 import 'screens/first_time_splash.dart';
+import 'screens/suggested_friends_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -146,6 +147,7 @@ class _MyAppState extends State<MyApp> {
               '/auth': (context) => AuthScreen(),
               '/first-time': (context) => const FirstTimeSplashScreen(),
               '/chat-list': (context) => ChatListScreen(),
+              '/suggested-friends': (context) => const SuggestedFriendsScreen(),
             },
           );
         },

@@ -94,8 +94,9 @@ class ChatProvider extends ChangeNotifier {
       _messages =
           cachedMessages.map((message) => message.toChatMessage()).toList();
 
-      await chatService.connectWebSocket(roomId: roomId);
-      _isConnected = true;
+      // Removed: await chatService.connectWebSocket(roomId: roomId);
+      // We will now connect "lazily" when a message is sent.
+      _isConnected = chatService.isConnected; // Sync with service state
       _isLoading = false;
       _notifySafely();
     } catch (e) {
@@ -106,11 +107,24 @@ class ChatProvider extends ChangeNotifier {
     }
   }
 
-  /// Send a text message
-  void sendMessage(String content) {
-    if (content.isEmpty || _currentRoomId == null || _currentUserId == null) {
+  /// Ensure WebSocket is connected before performing actions
+  Future<void> _ensureConnected() async {
+    if (_currentRoomId != null && !chatService.isConnected) {
+      print('🔌 Lazy connecting to WebSocket for room: $_currentRoomId');
+      await chatService.connectWebSocket(roomId: _currentRoomId!);
+      _isConnected = true;
+      _notifySafely();
+    }
+  }
+
+  /// 4. Send a text message
+  Future<void> sendMessage(String content) async {
+    if (content.trim().isEmpty || _currentRoomId == null || _currentUserId == null) {
       return;
     }
+
+    // Ensure we are connected before sending
+    await _ensureConnected();
 
     // Check if message is for bot
     if (content.startsWith('@bot ')) {
@@ -278,7 +292,9 @@ class ChatProvider extends ChangeNotifier {
         }
       } else {
         // This is a message from someone else or a new message
-        _messages.add(message);
+        if (!_messages.any((m) => m.id == message.id)) {
+          _messages.add(message);
+        }
 
         // Save new messages to Hive cache
         if (_currentRoomId != null) {
@@ -321,10 +337,9 @@ class ChatProvider extends ChangeNotifier {
         
         // Update Hive
         unawaited(
-          _persistenceService.updateMessageId(
+          _persistenceService.markMessageAsRead(
             _currentRoomId!,
             messageId,
-            MessageModel.fromChatMessage(_messages[index]),
           ),
         );
         

@@ -11,6 +11,7 @@ class MessageModel {
   final bool isBot;
   final MessageType type;
   final MessageStatus status;
+  final bool isSeen;
 
   const MessageModel({
     required this.id,
@@ -22,6 +23,7 @@ class MessageModel {
     this.isBot = false,
     this.type = MessageType.text,
     this.status = MessageStatus.delivered,
+    this.isSeen = false,
   });
 
   factory MessageModel.fromChatMessage(ChatMessage message) {
@@ -35,6 +37,7 @@ class MessageModel {
       isBot: message.isBot,
       type: message.type,
       status: message.status,
+      isSeen: message.status == MessageStatus.read,
     );
   }
 
@@ -52,6 +55,7 @@ class MessageModel {
       status: json['is_read'] == true 
           ? MessageStatus.read 
           : _parseMessageStatus(json['status']?.toString() ?? 'delivered'),
+      isSeen: json['is_seen'] == true || json['is_read'] == true,
     );
   }
 
@@ -63,7 +67,7 @@ class MessageModel {
       username: username,
       roomId: roomId,
       type: type,
-      status: status,
+      status: isSeen ? MessageStatus.read : status,
       isBot: isBot,
       timestamp: timestamp,
     );
@@ -80,7 +84,8 @@ class MessageModel {
       'is_bot': isBot,
       'message_type': _messageTypeToString(type),
       'status': status.name,
-      'is_read': status == MessageStatus.read,
+      'is_read': isSeen || status == MessageStatus.read,
+      'is_seen': isSeen,
     };
   }
 

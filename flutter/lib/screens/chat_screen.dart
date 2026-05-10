@@ -121,14 +121,17 @@ class _ChatScreenState extends State<ChatScreen> {
                     final message = chatProvider.messages[index];
                     final isCurrentUser = message.userId == widget.userId;
 
-                    // Mark incoming messages as read
-                    if (!isCurrentUser && !message.isBot && message.status != MessageStatus.read) {
+                    // Mark incoming messages as read ONLY if they are not already seen
+                    if (!isCurrentUser && 
+                        !message.isBot && 
+                        message.status != MessageStatus.read) {
                       WidgetsBinding.instance.addPostFrameCallback((_) {
                         chatProvider.markAsRead(message.id);
                       });
                     }
 
                     return ChatBubble(
+                      key: ValueKey(message.id),
                       message: message,
                       isCurrentUser: isCurrentUser,
                       showAvatar: !isCurrentUser,
