@@ -133,40 +133,65 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
-  /// Logout user
+  /// Clear auth state immediately (for instant UI updates)
+  void clearAuth() {
+    _currentUser = null;
+    _isAuthenticated = false;
+    notifyListeners();
+    print('✓ Auth state cleared');
+  }
+
+  /// Logout user - clears state and navigates immediately, backend cleanup in background
   Future<void> logout() async {
-    _isLoading = true;
-    _error = null;
+    clearAuth();
+    logoutBackground();
+  }
+
+  /// Background logout - handle backend logout and token cleanup without blocking UI
+  void logoutBackground() {
+    // Fire and forget - don't block on these operations
+    Future.microtask(() async {
+      try {
+        await apiService.logout();
+        print('✓ Backend logout successful');
+      } catch (e) {
+        print('✗ Backend logout failed: $e');
+      }
+
+      try {
+        await notificationService.deleteToken();
+        print('✓ FCM token cleanup done');
+      } catch (e) {
+        print('✗ FCM cleanup failed: $e');
+      }
+    });
+  }
+
+  /// Old logout method for backward compatibility
+  Future<void> logoutLegacy() async {
+    _currentUser = null;
+    _isAuthenticated = false;
     notifyListeners();
 
     try {
-      // Delete FCM token from backend before logging out
-      await notificationService.deleteToken();
-
       await apiService.logout();
-      _currentUser = null;
-      _isAuthenticated = false;
-      _isLoading = false;
-      notifyListeners();
       print('✓ Logout successful');
     } catch (e) {
-      _error = e.toString();
-      _isLoading = false;
-      notifyListeners();
-      print('✗ Logout failed: $e');
+      print('✗ Logout API call failed: $e');
     }
+
+    // Delete FCM token in the background (don't block logout)
+    notificationService.deleteToken().ignore();
   }
 
   /// Force a logout when the session is no longer valid.
   Future<void> handleSessionExpired() async {
+    clearAuth();
+    _error = 'Session expired. Please log in again.';
+    notifyListeners();
+
     try {
       await apiService.forceLogout();
-      _currentUser = null;
-      _isAuthenticated = false;
-      _isAuthenticating = false;
-      _isLoading = false;
-      _error = 'Session expired. Please log in again.';
-      notifyListeners();
       print('✓ Session expired - user logged out');
     } catch (e) {
       print('✗ Failed to handle expired session: $e');

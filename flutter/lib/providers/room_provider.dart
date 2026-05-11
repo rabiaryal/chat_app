@@ -34,7 +34,7 @@ class RoomProvider extends ChangeNotifier {
 
   Future<void> _updateRoomLastMessage(ChatMessage message) async {
     final index = _rooms.indexWhere((r) => r.id == message.roomId);
-    
+
     if (index != -1) {
       final room = _rooms[index];
 
@@ -52,7 +52,8 @@ class RoomProvider extends ChangeNotifier {
       // Update existing room
       if (message.content.isNotEmpty) {
         // *** FIX: Don't increment unread for messages the current user sent ***
-        final isOwnMessage = _currentUserId != null && message.userId == _currentUserId;
+        final isOwnMessage =
+            _currentUserId != null && message.userId == _currentUserId;
         _rooms[index] = room.copyWith(
           lastMessage: message.content,
           lastMessageTimestamp: message.timestamp,
@@ -69,7 +70,8 @@ class RoomProvider extends ChangeNotifier {
       // NEW: If room not found, it might be a new connection/friendship
       // Fetch the room details from API and add it
       try {
-        final response = await apiService.dio.get('/api/v1/rooms/${message.roomId}/');
+        final response =
+            await apiService.dio.get('/api/v1/rooms/${message.roomId}/');
         if (response.statusCode == 200) {
           final newRoom = ChatRoom.fromJson(response.data);
           _rooms.insert(0, newRoom);
@@ -97,6 +99,48 @@ class RoomProvider extends ChangeNotifier {
           print('✗ Failed to mark room as read on server: $e');
         }
       }
+    }
+  }
+
+  Future<void> deleteRoom(String roomId) async {
+    try {
+      // Remove current user from room members (leave room)
+      // This works for all participants, not just creators
+      await apiService.dio.delete('/api/v1/rooms/$roomId/members/');
+      _rooms.removeWhere((r) => r.id == roomId);
+      notifyListeners();
+      print('✓ Room $roomId deleted');
+    } catch (e) {
+      print('✗ Failed to delete room: $e');
+      rethrow;
+    }
+  }
+
+  Future<void> addMember(String roomId, int userId) async {
+    try {
+      await apiService.dio.post(
+        '/api/v1/rooms/$roomId/members/',
+        data: {'user_id': userId},
+      );
+      print('✓ Member $userId added to room $roomId');
+    } catch (e) {
+      print('✗ Failed to add member: $e');
+      rethrow;
+    }
+  }
+
+  Future<void> removeMember(String roomId, int userId) async {
+    try {
+      final resp =
+          await apiService.removeRoomMember(roomId: roomId, userId: userId);
+      print(
+          '✓ Member $userId removed from room $roomId — server responded: ${resp['message'] ?? ''}');
+
+      // Optionally notify listeners so UI can refresh where needed
+      notifyListeners();
+    } catch (e) {
+      print('✗ Failed to remove member: $e');
+      rethrow;
     }
   }
 

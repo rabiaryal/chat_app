@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../models/chat_room.dart';
 import '../../providers/chat_provider.dart';
+import '../../providers/room_provider.dart';
 import '../../screens/chat_screen.dart';
 
 class ChatCard extends StatelessWidget {
@@ -146,6 +147,78 @@ class ChatCard extends StatelessWidget {
                   ),
               ],
             ),
+          ),
+          trailing: PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert, color: Colors.grey),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+            onSelected: (value) async {
+              final roomProvider =
+                  Provider.of<RoomProvider>(context, listen: false);
+              if (value == 'mark_read') {
+                await roomProvider.markRoomAsRead(room.id);
+              } else if (value == 'delete') {
+                final confirm = await showDialog<bool>(
+                  context: context,
+                  builder: (context) => AlertDialog(
+                    title: const Text('Delete Chat'),
+                    content: Text(
+                        'Are you sure you want to delete your chat with $displayName? This action cannot be undone.'),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context, false),
+                        child: const Text('Cancel'),
+                      ),
+                      TextButton(
+                        onPressed: () => Navigator.pop(context, true),
+                        style: TextButton.styleFrom(foregroundColor: Colors.red),
+                        child: const Text('Delete'),
+                      ),
+                    ],
+                  ),
+                );
+
+                if (confirm == true) {
+                  try {
+                    await roomProvider.deleteRoom(room.id);
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Chat deleted')),
+                      );
+                    }
+                  } catch (e) {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Failed to delete: $e')),
+                      );
+                    }
+                  }
+                }
+              }
+            },
+            itemBuilder: (context) => [
+              if (hasNewMessage)
+                const PopupMenuItem(
+                  value: 'mark_read',
+                  child: Row(
+                    children: [
+                      Icon(Icons.mark_chat_read_outlined, size: 20),
+                      SizedBox(width: 10),
+                      Text('Mark as read'),
+                    ],
+                  ),
+                ),
+              const PopupMenuItem(
+                value: 'delete',
+                child: Row(
+                  children: [
+                    Icon(Icons.delete_outline, color: Colors.red, size: 20),
+                    SizedBox(width: 10),
+                    Text('Delete Chat', style: TextStyle(color: Colors.red)),
+                  ],
+                ),
+              ),
+            ],
           ),
         ),
       ),

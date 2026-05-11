@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/room_provider.dart';
 import '../providers/chat_provider.dart';
+import '../providers/friend_provider.dart';
 import '../models/chat_room.dart';
 import '../models/user.dart';
 import '../services/api_service.dart';
@@ -29,6 +30,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
   bool _isLoading = true;
   int? _userId;
   String _username = '';
+  bool _isLoggingOut = false; // Prevent double-tap logout
 
   @override
   void initState() {
@@ -44,10 +46,13 @@ class _ChatListScreenState extends State<ChatListScreen> {
     if (!mounted) return;
     setState(() => _isLoading = true);
     final roomProvider = Provider.of<RoomProvider>(context, listen: false);
+    final friendProvider = Provider.of<FriendProvider>(context, listen: false);
     final apiService = ApiService();
 
     try {
       await roomProvider.loadRooms();
+      // Ensure friends are loaded so the horizontal list shows immediately
+      friendProvider.loadAllFriendsData();
       final user = await apiService.getCurrentUser();
       if (!mounted) return;
       roomProvider.setCurrentUserId(user.id);
@@ -64,30 +69,23 @@ class _ChatListScreenState extends State<ChatListScreen> {
     }
   }
 
-  void _logout() async {
-    if (!mounted) return;
+  void _logout() {
+    // Prevent double-tap logout
+    if (_isLoggingOut) return;
+    _isLoggingOut = true;
 
-    // 1. Capture the navigator and auth provider before any async work
-    final navigator = Navigator.of(context);
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
 
-    try {
-      // 2. Clear tokens locally and navigate immediately for better UX
-      // We don't want to wait for the API if it's slow or failing
-      await authProvider.logout();
+    // 1. Clear auth state immediately
+    authProvider.clearAuth();
 
-      if (!mounted) return;
-
-      // 3. Use the captured navigator to go back to auth
-      navigator.pushNamedAndRemoveUntil('/auth', (route) => false);
-
-      print('✓ Logout successful and navigated to login');
-    } catch (e) {
-      print('✗ Logout error (navigating anyway): $e');
-      if (!mounted) return;
-      // Even if the API fails, we should clear local state and go to login
-      navigator.pushNamedAndRemoveUntil('/auth', (route) => false);
+    // 2. Navigate to login instantly (no await)
+    if (mounted) {
+      Navigator.of(context).pushNamedAndRemoveUntil('/auth', (route) => false);
     }
+
+    // 3. Handle cleanup in background (fire and forget)
+    authProvider.logoutBackground();
   }
 
   @override
@@ -129,10 +127,9 @@ class _ChatListScreenState extends State<ChatListScreen> {
   }
 
   Widget _buildHorizontalList(Color primaryColor) {
-    return Consumer<RoomProvider>(
-      builder: (context, roomProvider, _) {
-        // Show all active rooms (Groups and DMs) in the top circle list
-        final rooms = roomProvider.rooms;
+    return Consumer<FriendProvider>(
+      builder: (context, friendProvider, _) {
+        final friends = friendProvider.friends;
 
         return Container(
           height: 110,
@@ -140,7 +137,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
           child: ListView.builder(
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(horizontal: 16),
-            itemCount: rooms.length + 1,
+            itemCount: friends.length + 1,
             itemBuilder: (context, index) {
               if (index == 0) {
                 // New Group Button
@@ -180,48 +177,72 @@ class _ChatListScreenState extends State<ChatListScreen> {
                 );
               }
 
-              final room = rooms[index - 1];
-              final isGroup = room.roomType == 'GROUP';
-              final String displayName = isGroup
-                  ? room.name
-                  : (room.otherParticipantName.isNotEmpty
-                      ? room.otherParticipantName
-                      : room.name);
+              final friend = friends[index - 1];
 
               return Padding(
                 padding: const EdgeInsets.only(right: 15),
                 child: Column(
                   children: [
                     GestureDetector(
-                      onTap: () {
+                      onTap: () async {
+                        final roomProvider =
+                            Provider.of<RoomProvider>(context, listen: false);
                         final chatProvider =
                             Provider.of<ChatProvider>(context, listen: false);
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => ChangeNotifierProvider.value(
-                              value: chatProvider,
-                              child: ChatScreen(
-                                roomId: room.id,
-                                roomName: displayName,
-                                userId: _userId ?? 0,
-                                username: _username,
-                                friendId: isGroup
-                                    ? 0
-                                    : (room.otherParticipantId ?? 0),
-                                isGroup: isGroup,
+
+                        try {
+                          // Get or create DM room with this friend
+                          final room = await context
+                              .read<ApiService>()
+                              .getOrCreateDirectRoom(friend.id);
+
+                          if (!mounted) return;
+
+                          // Validate room data
+                          if (room.id.isEmpty) {
+                            throw Exception('Invalid room ID from server');
+                          }
+
+                          // Navigate to chat
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) =>
+                                  ChangeNotifierProvider.value(
+                                value: chatProvider,
+                                child: ChatScreen(
+                                  roomId: room.id,
+                                  roomName: friend.displayName,
+                                  userId: _userId ?? 0,
+                                  username:
+                                      _username.isNotEmpty ? _username : 'User',
+                                  friendId: friend.id,
+                                  isGroup: false,
+                                ),
                               ),
                             ),
-                          ),
-                        );
+                          );
+
+                          // Add room to provider if it's new
+                          if (!roomProvider.rooms.any((r) => r.id == room.id)) {
+                            roomProvider.addRoom(room);
+                          }
+                        } catch (e) {
+                          if (mounted) {
+                            print('✗ Chat error: $e');
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                  content: Text(
+                                      'Failed to start chat: ${e.toString()}')),
+                            );
+                          }
+                        }
                       },
                       child: Container(
                         width: 65,
                         height: 65,
                         decoration: BoxDecoration(
-                          color: isGroup
-                              ? primaryColor.withOpacity(0.1)
-                              : Colors.grey[100],
+                          color: Colors.grey[100],
                           shape: BoxShape.circle,
                           border: Border.all(color: Colors.white, width: 2),
                           boxShadow: [
@@ -232,27 +253,17 @@ class _ChatListScreenState extends State<ChatListScreen> {
                             ),
                           ],
                         ),
-                        child: ClipOval(
-                          child: isGroup
-                              ? Center(
-                                  child: Text(
-                                    displayName.trim().isNotEmpty
-                                        ? displayName.trim()[0].toUpperCase()
-                                        : '?',
-                                    style: TextStyle(
-                                      color: primaryColor,
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 20,
-                                    ),
-                                  ),
-                                )
-                              : (room.otherParticipantAvatar != null
-                                  ? Image.network(room.otherParticipantAvatar!,
+                        child: Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            ClipOval(
+                              child: friend.avatar != null
+                                  ? Image.network(friend.avatar!,
                                       fit: BoxFit.cover)
                                   : Center(
                                       child: Text(
-                                        displayName.trim().isNotEmpty
-                                            ? displayName
+                                        friend.displayName.trim().isNotEmpty
+                                            ? friend.displayName
                                                 .trim()[0]
                                                 .toUpperCase()
                                             : '?',
@@ -262,7 +273,25 @@ class _ChatListScreenState extends State<ChatListScreen> {
                                           fontSize: 20,
                                         ),
                                       ),
-                                    )),
+                                    ),
+                            ),
+                            // Online indicator
+                            if (friend.isOnline)
+                              Positioned(
+                                bottom: 0,
+                                right: 0,
+                                child: Container(
+                                  width: 14,
+                                  height: 14,
+                                  decoration: BoxDecoration(
+                                    color: Colors.green,
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                        color: Colors.white, width: 2),
+                                  ),
+                                ),
+                              ),
+                          ],
                         ),
                       ),
                     ),
@@ -270,7 +299,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                     SizedBox(
                       width: 65,
                       child: Text(
-                        displayName,
+                        friend.displayName,
                         textAlign: TextAlign.center,
                         style: const TextStyle(
                             fontSize: 12, fontWeight: FontWeight.w500),

@@ -80,6 +80,7 @@ class _ChatScreenState extends State<ChatScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: ChatHeader(
+        roomId: widget.roomId,
         roomName: widget.roomName,
         isGroup: widget.isGroup,
         friendId: widget.friendId,

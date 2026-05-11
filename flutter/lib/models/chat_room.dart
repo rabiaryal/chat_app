@@ -44,9 +44,14 @@ class ChatRoom {
   });
 
   factory ChatRoom.fromJson(Map<String, dynamic> json) {
+    final id = json['id'];
+    if (id == null || (id is! String && id is! int)) {
+      throw FormatException('Invalid room ID: $id (type: ${id.runtimeType})');
+    }
+
     return ChatRoom(
-      id: json['id'] as String,
-      name: json['name'] as String,
+      id: id.toString(),
+      name: json['name'] as String? ?? 'Chat',
       description: json['description'] as String? ?? '',
       roomType: json['room_type'] as String? ?? 'GROUP',
       creatorId: json['creator_id'] as int? ?? 0,
@@ -54,12 +59,15 @@ class ChatRoom {
       participants: json['participants'] as List<dynamic>? ?? [],
       participantsCount: json['participants_count'] as int? ?? 0,
       isActive: json['is_active'] as bool? ?? true,
-      createdAt: DateTime.parse(json['created_at'] as String),
-      updatedAt: DateTime.parse(json['updated_at'] as String),
+      createdAt: DateTime.parse(
+          json['created_at'] as String? ?? DateTime.now().toIso8601String()),
+      updatedAt: DateTime.parse(
+          json['updated_at'] as String? ?? DateTime.now().toIso8601String()),
       lastMessage: json['last_message'] as String?,
       lastMessageTimestamp: json['last_message_timestamp'] != null
           ? DateTime.parse(json['last_message_timestamp'] as String)
-          : DateTime.parse(json['updated_at'] as String),
+          : DateTime.parse(json['updated_at'] as String? ??
+              DateTime.now().toIso8601String()),
       lastMessageSenderId: json['last_message_sender_id'] as int?,
       unreadCount: json['unread_count'] as int? ?? 0,
       otherParticipantName: json['other_participant_name'] as String? ?? '',
@@ -127,7 +135,8 @@ class ChatRoom {
       unreadCount: unreadCount ?? this.unreadCount,
       otherParticipantName: otherParticipantName ?? this.otherParticipantName,
       otherParticipantId: otherParticipantId ?? this.otherParticipantId,
-      otherParticipantAvatar: otherParticipantAvatar ?? this.otherParticipantAvatar,
+      otherParticipantAvatar:
+          otherParticipantAvatar ?? this.otherParticipantAvatar,
     );
   }
 

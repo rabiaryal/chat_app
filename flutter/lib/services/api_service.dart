@@ -643,7 +643,7 @@ class ApiService {
         data: {'user_id': userId},
       );
 
-      if (response.statusCode == 200) {
+      if (response.statusCode == 200 || response.statusCode == 201) {
         print('✓ Added user $userId to room $roomId');
       } else {
         throw Exception('Failed to add member');
@@ -671,7 +671,8 @@ class ApiService {
   }
 
   /// Remove a specific member from a group chat
-  Future<void> removeRoomMember({
+  /// Returns the server response body (including updated participants) on success.
+  Future<Map<String, dynamic>> removeRoomMember({
     required String roomId,
     required int userId,
   }) async {
@@ -681,12 +682,20 @@ class ApiService {
 
       if (response.statusCode == 200) {
         print('✓ Removed user $userId from room $roomId');
+        return Map<String, dynamic>.from(response.data as Map);
       } else {
         throw Exception('Failed to remove member');
       }
     } on DioException catch (e) {
-      print('✗ Remove room member error: $e');
-      rethrow;
+      // Extract error message from response if available
+      String errorMsg = 'Failed to remove member';
+      if (e.response?.data is Map) {
+        final errorData = e.response!.data as Map;
+        errorMsg = errorData['error'] ?? errorData['detail'] ?? errorMsg;
+      }
+      print(
+          '✗ Remove room member error (${e.response?.statusCode}): $errorMsg');
+      throw Exception(errorMsg);
     }
   }
 
