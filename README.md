@@ -1,370 +1,168 @@
-# 💬 Chat Application - Hybrid Backend (Django + FastAPI + Flutter)
-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
-A **production-ready** full-stack chat application with:
-- **Django REST API** (Port 8000) - User authentication, JWT tokens, REST endpoints
-- **FastAPI WebSocket Service** (Port 8081) - Real-time chat, AI responses, streaming
-- **Flutter Mobile/Web Client** - Cross-platform UI with authentication & chat
-- **PostgreSQL + Redis** - Persistent storage and caching
+# 💬 Modern Real-Time Chat Application
 
-## 🎯 Key Highlights
+A full-stack chat application built with a **Flutter** client and a **Django** backend. The app supports real-time messaging, unread tracking, friend requests, group chats, push notifications, and local persistence for a smoother chat experience.
 
-✅ **Centralized JWT Authentication** - Django issues, FastAPI validates with shared SECRET_KEY  
-✅ **Real-Time WebSocket Chat** - Async streaming, AI responses, connection management  
-✅ **Production Docker Setup** - Fully orchestrated with health checks & auto-restart  
-✅ **Scalable Architecture** - Separate services, easy to scale horizontally  
-✅ **AI Chatbot Ready** - Streaming responses compatible with OpenAI, Cohere, Anthropic  
+<p align="center">
+        <img src="flutter/assets/images/logo.png" alt="Chat App logo" width="160" />
+</p>
 
----
+## Overview
 
-## 🚀 Quick Start (5 Minutes)
+The Flutter app is the primary user-facing client. It handles authentication, room browsing, chat screens, unread badges, friend discovery, and message rendering. The backend provides the REST API, WebSocket channels, room persistence, friendship workflow, and message read-state tracking.
 
-```bash
-# 1. Navigate to project
-cd /Applications/development/flutter_dev/chat_app
+## Features
 
-# 2. Create environment file
-cp .env.example .env
+### Flutter Client
 
-# 3. Generate SECRET_KEY (recommended)
-openssl rand -hex 32 | xargs echo SECRET_KEY= >> .env
+- **Beautiful branded launch flow**: The app uses `assets/images/logo.png` for the splash screen and launcher icons so the branding is consistent from install time to startup.
+- **Logo-driven experience**: The same logo is shown in the README and in-app splash flows, so the project feels visually consistent across documentation and the client.
+- **JWT authentication and session restore**: Login tokens are stored in Hive and reused automatically so the user stays signed in across launches.
+- **Room list with unread badges**: The chat list is loaded from the API and the unread count comes from the server response, which keeps the list in sync after refreshes.
+- **Unread section**: Rooms are filtered locally by `unreadCount > 0`, so the unread tab reflects the same state used by the badges.
+- **Real-time chat**: Messages stream over WebSockets through `ChatService` and are managed in the UI with Provider.
+- **Read receipts and read persistence**: When a chat is opened, the client marks the room as read on the backend and updates local state so unread counts stay accurate.
+- **Typing indicators**: The websocket layer forwards typing events so active conversations feel live.
+- **Friend requests and suggestions**: The suggested-friends flow lets users send requests directly from the app.
+- **Group chat support**: Users can create group rooms and manage conversations in the same room list.
+- **Local message persistence**: Recent messages are cached in Hive so rooms can reopen quickly and still show recent content when network conditions are poor.
+- **Account switching safety**: Chat state is reinitialized when the active user changes so messages and sender identity do not leak across sessions.
 
-# 4. Start all services
-docker-compose up -d
+## Screenshots
 
-# 5. Access services
-# - Django: http://localhost:8000/api/v1/auth/login/
-# - Admin: http://localhost:8000/admin
-# - FastAPI: ws://localhost:8081/ws/chat/{room_id}?token=...
+The main visual flow is documented in the root [images/](images) folder.
+
+### Welcome and Authentication
+
+<p align="center">
+        <img src="images/welcome_page.jpeg" alt="Welcome page" width="260" />
+</p>
+
+<p align="center">
+        <img src="images/login_page.jpeg" alt="Login page" width="260" />
+        <img src="images/create_account_page.jpeg" alt="Create account page" width="260" />
+</p>
+
+### Dashboard and Discovery
+
+<p align="center">
+        <img src="images/empty_dashboard.jpeg" alt="Empty dashboard" width="260" />
+        <img src="images/find_friends.jpeg" alt="Find friends" width="260" />
+</p>
+
+<p align="center">
+        <img src="images/suggestions_page.jpeg" alt="Suggested friends" width="260" />
+        <img src="images/friends_request_page.jpeg" alt="Friend requests" width="260" />
+</p>
+
+### Chat Experience
+
+<p align="center">
+        <img src="images/chat_section.jpeg" alt="Chat list section" width="260" />
+        <img src="images/chat_page.jpeg" alt="Chat page" width="260" />
+</p>
+
+<p align="center">
+        <img src="images/unread_section.jpeg" alt="Unread section" width="260" />
+</p>
+
+### Profile
+
+<p align="center">
+        <img src="images/profile_page.jpeg" alt="Profile page" width="260" />
+</p>
+
+### Backend and Infrastructure
+
+- **REST API with Django REST Framework**: Handles login, profile lookup, room loading, friend requests, room read updates, and message retrieval.
+- **WebSocket messaging with Django Channels**: Real-time message delivery, typing events, secure message forwarding, and read receipt events are handled in the consumer layer.
+- **Unread persistence**: Message read state is stored on the server with the `Message.is_read` field and room lists expose `unread_count` for the Flutter client.
+- **Friendship workflow**: Friend requests are created, accepted, rejected, and listed through dedicated backend endpoints.
+- **Database-backed chat rooms**: Rooms and direct-message relationships are persisted in PostgreSQL so they survive app restarts.
+- **Push notifications**: FCM support is wired through the backend notification flow for new-message delivery.
+- **Containerized deployment**: The project is set up with Docker and Docker Compose for local development and repeatable deployment.
+
+## How It Works
+
+1. **Authentication**: The Flutter client logs in through the API, saves access and refresh tokens in Hive, and restores the session on launch.
+2. **Room loading**: `RoomProvider` fetches chat rooms from the backend, including the last message, unread count, and direct-message metadata.
+3. **Opening a chat**: Tapping a room opens `ChatScreen`, initializes the `ChatProvider`, connects the WebSocket, and marks the room as read.
+4. **Sending messages**: The client sends the message over WebSocket, updates local UI immediately, and persists the message in Hive.
+5. **Receiving messages**: Incoming WebSocket events are added to the active chat, cached locally, and counted as unread on the room list when appropriate.
+6. **Read sync**: The backend updates `Message.is_read` and the room endpoint reflects the new unread count on the next refresh.
+
+## Architecture
+
+```text
+Flutter App
+- Screens, widgets, Provider state, Hive cache
+- REST API for rooms, auth, friends, profile
+- WebSocket chat for realtime updates
+        |
+        | REST + WebSocket
+        v
+Django Backend
+- DRF views and serializers
+- Channels consumers
+- Friendship, room, and message models
+- FCM notifications and read tracking
+        |
+        v
+PostgreSQL / Redis
+- Persistent chat, users, friendships, unread state
+- Realtime channel layer and temporary messaging state
 ```
 
-**See [QUICKSTART.md](QUICKSTART.md) for detailed setup instructions.**
+## Project Structure
 
----
-
-## 🏗️ System Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                 Flutter Client App                           │
-│         (Login → Create Room → Real-time Chat)               │
-└────────┬─────────────────────────────────┬──────────────────┘
-         │                                 │
-    REST API (Auth)              WebSocket (Real-time Chat)
-         │                                 │
-    HTTP POST                           WS://
-         │                                 │
-┌────────▼─────────┐            ┌─────────▼────────────┐
-│  Django 8000     │            │  FastAPI 8081        │
-├──────────────────┤            ├──────────────────────┤
-│ - Register/Login │            │ - WebSocket Endpoint │
-│ - JWT Issuance   │            │ - Message Broadcast  │
-│ - User Profiles  │            │ - AI Responses       │
-│ - Chat Rooms     │            │ - Typing Indicators  │
-└────────┬──────────┘            └──────────┬───────────┘
-         │                                 │
-         └──────────┬──────────────────────┘
-                    │
-            Shared JWT Validation
-                    │
-        ┌───────────▼─────────────┐
-        │  PostgreSQL Database    │
-        │  - Users               │
-        │  - Rooms               │
-        │  - Messages            │
-        └────────────────────────┘
-                    │
-        ┌───────────▼─────────────┐
-        │   Redis Cache           │
-        │  - Sessions             │
-        │  - Temp Data            │
-        └────────────────────────┘
-```
-
----
-
-## 📁 Project Structure
-
-```
+```text
 chat_app/
-├── docker-compose.yml              # Service orchestration
-├── .env.example                    # Configuration template
-├── init-db.sql                     # Database initialization
-│
-├── backend_core/                   # Django Backend (Port 8000)
-│   ├── Dockerfile
-│   ├── requirements.txt
-│   └── chat_project/
-│       ├── manage.py
-│       ├── chat_project/           # Django project settings
-│       │   ├── settings.py         # JWT, DB, middleware config
-│       │   ├── urls.py
-│       │   └── wsgi.py
-│       └── chat_app/               # Main app
-│           ├── models.py           # User, ChatRoom, Message
-│           ├── serializers.py      # DRF serializers
-│           ├── views.py            # REST endpoints
-│           └── urls.py
-│
-├── fastapi_chat/                   # FastAPI Backend (Port 8081)
-│   ├── Dockerfile
-│   ├── requirements.txt
-│   ├── main.py                     # WebSocket app & endpoints
-│   ├── config.py                   # Settings & environment
-│   ├── jwt_utils.py                # JWT validation
-│   └── ai_utils.py                 # AI response generation
-│
-├── flutter/lib/services/           # Flutter Client Services
-│   ├── api_service.dart            # HTTP client for Django
-│   ├── websocket_service.dart      # WebSocket client for FastAPI
-│   └── chat_service_example.dart   # Integration examples
-│
-├── QUICKSTART.md                   # 5-minute setup guide
-├── IMPLEMENTATION_GUIDE.md         # Complete documentation
-├── DJANGO_GUIDE.md                 # Django backend details
-├── FASTAPI_GUIDE.md                # FastAPI backend details
-└── FLUTTER_GUIDE.md                # Flutter integration guide
+├── backend_core/           # Django backend
+│   ├── chat_project/       # Project configuration and settings
+│   └── chat_app/           # Models, views, serializers, consumers
+├── flutter/                # Flutter mobile app
+│   ├── lib/models/         # App data models
+│   ├── lib/providers/      # State management
+│   ├── lib/services/       # API, WebSocket, cache, notifications
+│   └── lib/screens/        # Auth, chat list, chat view, friends UI
+├── images/                  # README screenshots and product walkthrough images
+├── docs/                   # Technical documentation
+└── docker-compose.yml      # Local service orchestration
 ```
 
----
+## Quick Start
 
-## 🔐 Authentication Flow
+The Flutter app reuses the same logo asset during startup, so after install the first visible brand element matches the icon shown above.
 
-### User Registration & Login
+### Backend
 
-```
-User → POST /api/v1/auth/register/
-Django → Creates CustomUser
-       → Returns user data
-
-User → POST /api/v1/auth/login/
-Django → Validates credentials
-       → Issues JWT tokens (access + refresh)
-       → Returns {access, refresh, user_id, username}
-```
-
-### WebSocket Connection with JWT
-
-```
-Flutter → Extracts access token from local storage
-        → Connects to ws://localhost:8081/ws/chat/{room_id}?token={JWT}
-
-FastAPI → Receives WebSocket connection
-        → Decodes JWT using shared SECRET_KEY
-        → Validates token expiration & signature
-        → Broadcasts user as "joined" to room
-        → Manages connection lifecycle
-```
-
-### Token Validation (No Database Ping-Pong!)
-
-```
-FastAPI receives JWT token
-        ↓
-Decodes using settings.SECRET_KEY (same as Django)
-        ↓
-Extracts user info: user_id, username, email
-        ↓
-No database lookup needed! (Stateless)
-        ↓
-Token expires automatically based on 'exp' claim
-```
-
----
-
-## 🔄 Real-Time Chat Flow
-
-### Sending a Message
-
-```
-User types message in Flutter app
-        ↓
-WebSocket client sends: {"type": "text_message", "content": "..."}
-        ↓
-FastAPI receives, validates user
-        ↓
-Broadcasts to all users in room
-        ↓
-All connected clients receive message
-        ↓
-Message saved to PostgreSQL (optional)
-        ↓
-Conversation context updated for AI
-```
-
-### AI Response Streaming
-
-```
-User sends: {"type": "ai_request", "content": "..."}
-        ↓
-FastAPI routes to ai_utils.generate_response()
-        ↓
-AI service streams response chunks
-        ↓
-FastAPI yields: {"type": "ai_response_chunk", "content": "word"}
-        ↓
-Flutter UI updates in real-time
-        ↓
-Final message: {"type": "ai_response_complete", "tokens": 42}
-```
-
----
-
-## 📚 Documentation
-
-### Backend & General
-- **[QUICKSTART.md](QUICKSTART.md)** - Get entire system running in 5 minutes
-- **[IMPLEMENTATION_GUIDE.md](IMPLEMENTATION_GUIDE.md)** - Complete system overview
-- **[DJANGO_GUIDE.md](DJANGO_GUIDE.md)** - Backend REST API details
-- **[FASTAPI_GUIDE.md](FASTAPI_GUIDE.md)** - WebSocket & real-time guide
-- **[ARCHITECTURE.md](ARCHITECTURE.md)** - System architecture deep dive
-
-### Flutter Client (New!)
-- **[QUICKSTART_FLUTTER.md](QUICKSTART_FLUTTER.md)** - Get Flutter app running in 5 minutes ⭐
-- **[FLUTTER_ARCHITECTURE.md](FLUTTER_ARCHITECTURE.md)** - Complete Flutter architecture guide
-- **[TESTING_GUIDE.md](TESTING_GUIDE.md)** - Unit, widget, and integration testing
-- **[EMULATOR_SETUP.md](EMULATOR_SETUP.md)** - Android Emulator configuration (localhost fix)
-
----
-
-## 🔧 Technology Stack
-
-**Backend**
-- Django 4.2 + Django REST Framework
-- FastAPI 0.104 + Uvicorn
-- PostgreSQL 15
-- Redis 7
-- JWT (HS256)
-
-**Frontend**
-- Flutter 3.x (Dart)
-- HTTP package for REST
-- WebSocket for real-time
-
-**Infrastructure**
-- Docker & Docker Compose
-- Health checks & auto-restart
-- Environment-based configuration
-
----
-
-## 🎯 API Endpoints
-
-### Django REST API
-
-| Method | Endpoint | Purpose |
-|--------|----------|---------|
-| POST | `/api/v1/auth/register/` | Register new user |
-| POST | `/api/v1/auth/login/` | Get JWT tokens |
-| POST | `/api/v1/auth/refresh/` | Refresh access token |
-| GET | `/api/v1/users/me/` | Get current user |
-| GET | `/api/v1/users/list_users/` | List all users |
-| POST | `/api/v1/chat-rooms/` | Create chat room |
-| GET | `/api/v1/chat-rooms/` | List user's rooms |
-| POST | `/api/v1/messages/` | Send message |
-
-### FastAPI WebSocket
-
-| Protocol | Path | Purpose |
-|----------|------|---------|
-| WS | `/ws/chat/{room_id}?token=...` | Connect to room |
-| GET | `/health` | Health check |
-| GET | `/rooms/{room_id}/info` | Get room users |
-
----
-
-## 🚀 Deployment
-
-### Docker Production
 ```bash
+cd chat_app
 docker-compose up -d
 ```
 
-### Environment Variables
+### Flutter App
+
 ```bash
-cp .env.example .env
-# Generate: openssl rand -hex 32
-# Set: SECRET_KEY=...
-# Configure: DB, CORS, JWT settings
+cd flutter
+flutter pub get
+flutter run
 ```
 
-### Health Checks
-All services include health checks:
-```bash
-docker-compose ps  # Check status
-```
+## Documentation
 
-### Database & Authentication
-- Firebase Firestore / Realtime Database
-- Firebase Authentication
+- [Architecture Overview](docs/architecture.md)
+- [Authentication Flow](docs/auth_flow.md)
+- [WebSocket Events](docs/websocket.md)
+- [FCM Notifications](docs/fcm.md)
+- [Project Notes](docs/agent.md)
 
----
+## Tech Stack
 
-## 📌 API Overview
+- **Frontend**: Flutter, Provider, Hive, Dio, Firebase Messaging
+- **Backend**: Django, Django REST Framework, Django Channels
+- **Data**: PostgreSQL, Redis
+- **Deployment**: Docker, Docker Compose
 
-### Auth
-- POST `/auth/signup`
-- POST `/auth/login`
-- POST `/auth/logout`
-- GET `/auth/me`
-- PUT `/auth/profile`
-- POST `/auth/change-password`
-- POST `/auth/reset-password`
-- POST `/auth/confirm-password`
+## License
 
-### Users
-- POST `/users`
-- GET `/users/{id}`
-
-### Chats
-- POST `/chats`
-- GET `/chats`
-- DELETE `/chats/{chatId}`
-
-### Messages
-- POST `/messages`
-- GET `/messages/{chatId}`
-- DELETE `/messages/{messageId}`
-
-### Notifications
-- GET `/notifications`
-
-### WebSocket
-- WS `/ws/chat/{chatId}` → real-time message exchange
-
----
-
-## 🔐 Security Design
-
-- No direct frontend access to Firebase
-- Authentication enforced at backend level
-- WebSocket connections validated using auth tokens
-- All data access controlled through FastAPI
-
----
-
-## 🎯 Project Purpose
-
-This project was built as a **portfolio and live demo application** to demonstrate:
-- Clean backend architecture
-- Secure API and WebSocket integration
-- Real-world authentication workflows
-- Scalable chat system design
-
-The focus is on clarity, correctness, and real-time communication without overengineering.
-
----
-
-## 🛠️ Future Improvements
-
-- Group chat support
-- Message read receipts
-- Media and file sharing
-- Push notifications
-- Online/offline presence indicators
-
----
-
-## 📄 License
-
-This project is open-source and intended for learning and demonstration purposes.
-
+This project is open source and intended for learning and demonstration purposes.
