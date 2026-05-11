@@ -94,6 +94,7 @@ Thumbs.db
 *.pem
 *.crt
 secrets/
+backend_core/chat_project/firebase-key.json
 .gradle/
 **/android/captures/
 **/android/gradlew

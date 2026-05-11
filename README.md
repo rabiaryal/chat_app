@@ -27,6 +27,33 @@ The Flutter app is the primary user-facing client. It handles authentication, ro
 - **Local message persistence**: Recent messages are cached in Hive so rooms can reopen quickly and still show recent content when network conditions are poor.
 - **Account switching safety**: Chat state is reinitialized when the active user changes so messages and sender identity do not leak across sessions.
 
+## Flutter State Management
+
+The Flutter app uses the **Provider** pattern to keep UI, network state, and local persistence separated. Each provider owns one part of the app state and the screens rebuild only when the relevant data changes.
+
+### Providers
+
+- **AuthProvider**: Owns authentication state, session restore, logout, and the current login status.
+- **RoomProvider**: Owns the room list, unread counts, room refreshes, and room-level read state.
+- **ChatProvider**: Owns the active room conversation, message stream, typing state, read receipts, and message persistence for the open chat.
+- **FriendProvider**: Owns friend lists, incoming/outgoing requests, and friend actions like request, accept, reject, and remove.
+
+### How the State Flows
+
+1. The app starts by restoring authentication from Hive-backed token storage.
+2. After login, `AuthProvider` determines which home screen should be shown.
+3. `RoomProvider` fetches the room list from the backend and keeps the unread badges in sync with the server response.
+4. When a user opens a chat, `ChatProvider` loads cached messages first and then falls back to the REST API if needed.
+5. The WebSocket connection streams live messages into `ChatProvider`, which updates the UI immediately and persists the message locally.
+6. `RoomProvider` listens for message activity and updates the unread state when a new incoming message arrives.
+7. When the chat screen becomes active, the room is marked as read both locally and on the backend, so the unread badge and unread tab stay consistent.
+
+### Why This Approach
+
+- It keeps authentication, rooms, chat messages, and friends independent instead of mixing everything into one large global state object.
+- It makes chat updates fast because only the active conversation and related room entry need to rebuild.
+- It allows local cache and server state to work together, which helps the app load quickly and stay usable when the network is slow.
+
 ## Screenshots
 
 The main visual flow is documented in the root [images/](images) folder.
@@ -80,6 +107,65 @@ The main visual flow is documented in the root [images/](images) folder.
 - **Database-backed chat rooms**: Rooms and direct-message relationships are persisted in PostgreSQL so they survive app restarts.
 - **Push notifications**: FCM support is wired through the backend notification flow for new-message delivery.
 - **Containerized deployment**: The project is set up with Docker and Docker Compose for local development and repeatable deployment.
+
+## API Surface
+
+The backend exposes **29 REST endpoints** and **1 websocket route**.
+
+### REST APIs
+
+#### Authentication and session
+
+- `POST /api/v1/auth/register/`
+- `POST /api/v1/auth/login/`
+- `POST /api/v1/auth/logout/`
+- `POST /api/v1/auth/token/refresh/`
+- `POST /api/v1/auth/change-password/`
+
+#### User management
+
+- `GET /api/v1/user/me/`
+- `DELETE /api/v1/user/delete/`
+- `GET /api/v1/user/search/`
+- `GET /api/v1/user/suggested/`
+- `GET /api/v1/users/suggested/`
+
+#### Rooms and messages
+
+- `GET /api/v1/rooms/`
+- `POST /api/v1/rooms/create-group/`
+- `POST /api/v1/rooms/direct/<friend_id>/`
+- `POST /api/v1/rooms/<room_id>/read/`
+- `GET /api/v1/rooms/<room_id>/messages/`
+- `GET /api/v1/rooms/<room_id>/members/`
+- `POST /api/v1/rooms/<room_id>/members/`
+- `DELETE /api/v1/rooms/<room_id>/members/<user_id>/`
+- `POST /api/v1/chat/initialize/`
+
+#### Friendship
+
+- `POST /api/v1/friendship/request/`
+- `POST /api/v1/friendship/accept/`
+- `POST /api/v1/friendship/reject/`
+- `GET /api/v1/friendship/requests/incoming/`
+- `GET /api/v1/friendship/requests/outgoing/`
+- `GET /api/v1/friends/`
+- `DELETE /api/v1/friends/<friend_id>/`
+
+#### E2EE keys and devices
+
+- `POST /api/v1/keys/upload/`
+- `GET /api/v1/keys/<user_id>/`
+- `POST /api/v1/devices/register/`
+- `POST /api/v1/devices/unregister/`
+
+### WebSocket Route
+
+- `WS /ws/chat/<room_id>/`
+
+### Why WebSocket Is Used
+
+WebSocket keeps the chat experience live without polling. The Flutter client uses it to send and receive messages instantly, deliver typing indicators, synchronize read receipts, and update unread badge state as new messages arrive. The REST API handles the slower persistent operations like login, room loading, friendship changes, and read-state refreshes.
 
 ## How It Works
 
