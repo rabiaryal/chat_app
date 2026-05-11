@@ -2,8 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../models/chat_room.dart';
 import '../../providers/chat_provider.dart';
-import '../../providers/room_provider.dart';
-import '../../screens/chat_screen.dart';  
+import '../../screens/chat_screen.dart';
 
 class ChatCard extends StatelessWidget {
   final ChatRoom room;
@@ -23,9 +22,11 @@ class ChatCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final isGroup = room.roomType == 'GROUP';
     // Use otherParticipantName if available, otherwise fallback to room.name
-    final String displayName = isGroup 
-        ? room.name 
-        : (room.otherParticipantName.isNotEmpty ? room.otherParticipantName : room.name);
+    final String displayName = isGroup
+        ? room.name
+        : (room.otherParticipantName.isNotEmpty
+            ? room.otherParticipantName
+            : room.name);
 
     final bool hasNewMessage = room.unreadCount > 0;
 
@@ -45,11 +46,8 @@ class ChatCard extends StatelessWidget {
         ),
         child: ListTile(
           onTap: () {
-            final chatProvider = Provider.of<ChatProvider>(context, listen: false);
-            final roomProvider = Provider.of<RoomProvider>(context, listen: false);
-            
-            // Mark as read locally in the room list immediately
-            roomProvider.markRoomAsRead(room.id);
+            final chatProvider =
+                Provider.of<ChatProvider>(context, listen: false);
 
             Navigator.push(
               context,
@@ -80,7 +78,9 @@ class ChatCard extends StatelessWidget {
                 ? const Icon(Icons.groups, color: Colors.blue)
                 : Center(
                     child: Text(
-                        displayName.trim().isNotEmpty ? displayName.trim()[0].toUpperCase() : '?',
+                        displayName.trim().isNotEmpty
+                            ? displayName.trim()[0].toUpperCase()
+                            : '?',
                         style: const TextStyle(
                             fontWeight: FontWeight.bold, fontSize: 18))),
           ),
@@ -101,8 +101,8 @@ class ChatCard extends StatelessWidget {
                     if (isGroup)
                       const Padding(
                         padding: EdgeInsets.only(left: 6),
-                        child:
-                            Icon(Icons.groups, size: 18, color: Color(0xFF6C5CE7)),
+                        child: Icon(Icons.groups,
+                            size: 18, color: Color(0xFF6C5CE7)),
                       ),
                   ],
                 ),
@@ -126,15 +126,18 @@ class ChatCard extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                         color: hasNewMessage ? Colors.black87 : Colors.grey,
-                        fontWeight:
-                            hasNewMessage ? FontWeight.bold : FontWeight.normal),
+                        fontWeight: hasNewMessage
+                            ? FontWeight.bold
+                            : FontWeight.normal),
                   ),
                 ),
                 if (hasNewMessage)
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration:
-                        BoxDecoration(color: primaryColor, borderRadius: BorderRadius.circular(10)),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                        color: primaryColor,
+                        borderRadius: BorderRadius.circular(10)),
                     child: Text('${room.unreadCount}',
                         style: const TextStyle(
                             color: Colors.white,

@@ -25,6 +25,7 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
     super.initState();
     // Load friends if not already loaded
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
       context.read<FriendProvider>().loadFriends();
     });
   }

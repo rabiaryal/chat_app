@@ -13,12 +13,17 @@ class RoomProvider extends ChangeNotifier {
   List<ChatRoom> _rooms = [];
   bool _isLoading = false;
   String? _error;
+  int? _currentUserId; // Track logged-in user to avoid false unread counts
 
   RoomProvider({
     required this.apiService,
     required this.chatService,
   }) {
     _initMessageListener();
+  }
+
+  void setCurrentUserId(int userId) {
+    _currentUserId = userId;
   }
 
   void _initMessageListener() {
@@ -46,11 +51,13 @@ class RoomProvider extends ChangeNotifier {
 
       // Update existing room
       if (message.content.isNotEmpty) {
+        // *** FIX: Don't increment unread for messages the current user sent ***
+        final isOwnMessage = _currentUserId != null && message.userId == _currentUserId;
         _rooms[index] = room.copyWith(
           lastMessage: message.content,
           lastMessageTimestamp: message.timestamp,
           lastMessageSenderId: message.userId,
-          unreadCount: room.unreadCount + 1,
+          unreadCount: isOwnMessage ? room.unreadCount : room.unreadCount + 1,
         );
 
         // Move to top

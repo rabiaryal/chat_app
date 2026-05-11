@@ -88,7 +88,9 @@ class UserProfileScreen extends StatelessWidget {
                       padding:
                           EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                       decoration: BoxDecoration(
-                        color: (user.isOnline || isCurrentUser) ? Colors.green : Colors.grey,
+                        color: (user.isOnline || isCurrentUser)
+                            ? Colors.green
+                            : Colors.grey,
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Row(
@@ -100,7 +102,9 @@ class UserProfileScreen extends StatelessWidget {
                           ),
                           SizedBox(width: 8),
                           Text(
-                            (user.isOnline || isCurrentUser) ? 'Online' : 'Offline',
+                            (user.isOnline || isCurrentUser)
+                                ? 'Online'
+                                : 'Offline',
                             style: TextStyle(
                               color: Colors.white,
                               fontWeight: FontWeight.w600,
@@ -178,10 +182,8 @@ class UserProfileScreen extends StatelessWidget {
           ElevatedButton(
             onPressed: () {
               Navigator.pop(dialogContext);
-              // Call logout callback which handles API logout and navigation
-              Future.delayed(Duration(milliseconds: 100), () {
-                onLogout();
-              });
+              // Call logout callback after closing the dialog.
+              onLogout();
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.red[400],
@@ -237,5 +239,4 @@ class UserProfileScreen extends StatelessWidget {
       ),
     );
   }
-
 }

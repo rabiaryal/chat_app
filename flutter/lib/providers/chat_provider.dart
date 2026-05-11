@@ -64,14 +64,29 @@ class ChatProvider extends ChangeNotifier {
     required String username,
   }) async {
     // Prevent redundant initialization for the same room
-    if (_currentRoomId == roomId && _isConnected && _messages.isNotEmpty) {
+    if (_currentRoomId == roomId &&
+        _currentUserId == userId &&
+        _currentUsername == username &&
+        _isConnected &&
+        _messages.isNotEmpty) {
       print('ℹ ChatProvider already initialized for room: $roomId');
       return;
+    }
+
+    // Disconnect when switching rooms or switching accounts.
+    // The websocket and local sender identity must always match the active user.
+    if (_currentRoomId != null &&
+        (_currentRoomId != roomId ||
+            _currentUserId != userId ||
+            _currentUsername != username)) {
+      print('🔄 Reinitializing chat session for room: $roomId');
+      await chatService.disconnectWebSocket();
     }
 
     _currentRoomId = roomId;
     _currentUserId = userId;
     _currentUsername = username;
+    _messages = []; // Clear messages from previous room
     _isLoading = true;
     _error = null;
     _notifySafely();
@@ -94,9 +109,7 @@ class ChatProvider extends ChangeNotifier {
       _messages =
           cachedMessages.map((message) => message.toChatMessage()).toList();
 
-      // Removed: await chatService.connectWebSocket(roomId: roomId);
-      // We will now connect "lazily" when a message is sent.
-      _isConnected = chatService.isConnected; // Sync with service state
+      _isConnected = chatService.isConnected;
       _isLoading = false;
       _notifySafely();
     } catch (e) {
@@ -119,7 +132,9 @@ class ChatProvider extends ChangeNotifier {
 
   /// 4. Send a text message
   Future<void> sendMessage(String content) async {
-    if (content.trim().isEmpty || _currentRoomId == null || _currentUserId == null) {
+    if (content.trim().isEmpty ||
+        _currentRoomId == null ||
+        _currentUserId == null) {
       return;
     }
 
@@ -224,6 +239,16 @@ class ChatProvider extends ChangeNotifier {
 
   /// Handle incoming message
   void _onMessageReceived(ChatMessage message) {
+    // *** FIX BUG 1: Ignore messages that belong to a different room ***
+    // This prevents messages sent in room B from appearing in room A's view.
+    if (message.status != MessageStatus.read &&
+        message.roomId.isNotEmpty &&
+        message.roomId != _currentRoomId) {
+      print(
+          '⚠ Ignoring message for room ${message.roomId}, currently in $_currentRoomId');
+      return;
+    }
+
     // Clear typing indicator if receiving a message
     if (message.isBot && message.status == MessageStatus.streaming) {
       _typingIndicator = null;
@@ -238,7 +263,7 @@ class ChatProvider extends ChangeNotifier {
           _messages[existingIndex] = _messages[existingIndex].copyWith(
             status: MessageStatus.read,
           );
-          
+
           // Update Hive cache
           if (_currentRoomId != null) {
             unawaited(
@@ -253,7 +278,8 @@ class ChatProvider extends ChangeNotifier {
           print('✓ Updated message ${message.id} status to READ');
         }
       } else {
-        print('⚠ Message ${message.id} not found in local list for read receipt');
+        print(
+            '⚠ Message ${message.id} not found in local list for read receipt');
       }
       return;
     }
@@ -325,16 +351,15 @@ class ChatProvider extends ChangeNotifier {
     final index = _messages.indexWhere((m) => m.id == messageId);
     if (index != -1) {
       // Only send if it's not already read and it's NOT our own message
-      if (_messages[index].status != MessageStatus.read && 
+      if (_messages[index].status != MessageStatus.read &&
           _messages[index].userId != _currentUserId) {
-        
         _messages[index] = _messages[index].copyWith(
           status: MessageStatus.read,
         );
-        
+
         // Notify server
         chatService.sendMarkRead(_currentRoomId!, messageId);
-        
+
         // Update Hive
         unawaited(
           _persistenceService.markMessageAsRead(
@@ -342,7 +367,7 @@ class ChatProvider extends ChangeNotifier {
             messageId,
           ),
         );
-        
+
         _notifySafely();
       }
     }

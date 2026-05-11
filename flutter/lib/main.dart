@@ -166,10 +166,18 @@ class SplashScreen extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
-              Icons.chat_bubble_outline,
-              size: 80,
-              color: Theme.of(context).primaryColor,
+            ClipOval(
+              child: Image.asset(
+                'assets/images/logo.png',
+                width: 96,
+                height: 96,
+                fit: BoxFit.cover,
+                errorBuilder: (context, error, stackTrace) => Icon(
+                  Icons.chat_bubble_outline,
+                  size: 80,
+                  color: Theme.of(context).primaryColor,
+                ),
+              ),
             ),
             SizedBox(height: 24),
             Text(

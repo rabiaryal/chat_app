@@ -12,7 +12,7 @@ class SuggestedFriendsScreen extends StatefulWidget {
 
 class _SuggestedFriendsScreenState extends State<SuggestedFriendsScreen> {
   final ApiService _apiService = ApiService();
-  List<User> _suggestions = [];
+  List<Map<String, dynamic>> _suggestions = [];
   bool _isLoading = true;
   final Set<int> _addedUserIds = {};
 
@@ -25,12 +25,14 @@ class _SuggestedFriendsScreenState extends State<SuggestedFriendsScreen> {
   Future<void> _loadSuggestions() async {
     setState(() => _isLoading = true);
     try {
-      final response = await _apiService.dio.get('/api/v1/users/suggested/');
-      
-      // Safety check: Ensure we are dealing with a Map before accessing 'results'
+      final response = await _apiService.dio.get(
+        '/api/v1/users/suggested/',
+        queryParameters: {'limit': 10},
+      );
+
       dynamic data = response.data;
       List results = [];
-      
+
       if (data is Map) {
         results = data['results'] ?? [];
       } else if (data is List) {
@@ -38,9 +40,7 @@ class _SuggestedFriendsScreenState extends State<SuggestedFriendsScreen> {
       }
 
       setState(() {
-        _suggestions = results.whereType<Map<String, dynamic>>()
-            .map((json) => User.fromJson(json))
-            .toList();
+        _suggestions = results.whereType<Map<String, dynamic>>().toList();
         _isLoading = false;
       });
     } catch (e) {
@@ -52,14 +52,25 @@ class _SuggestedFriendsScreenState extends State<SuggestedFriendsScreen> {
   Future<void> _sendRequest(int userId) async {
     setState(() => _addedUserIds.add(userId));
     try {
-      await _apiService.dio.post('/api/v1/friends/request/', data: {'to_user_id': userId});
+      final response = await _apiService.dio.post(
+        '/api/v1/friendship/request/',
+        data: {'target_user_id': userId},
+      );
       if (mounted) {
-        SnackbarUtils.showSuccess(context, 'Friend request sent!');
+        SnackbarUtils.showSuccess(
+          context,
+          response.data is Map && response.data['message'] != null
+              ? response.data['message'].toString()
+              : 'Friend request sent!',
+        );
       }
     } catch (e) {
       setState(() => _addedUserIds.remove(userId));
       if (mounted) {
-        SnackbarUtils.showError(context, 'Failed to send request');
+        SnackbarUtils.showError(
+          context,
+          e.toString().replaceAll('Exception: ', ''),
+        );
       }
     }
   }
@@ -70,16 +81,19 @@ class _SuggestedFriendsScreenState extends State<SuggestedFriendsScreen> {
     final primaryColor = theme.primaryColor;
 
     return Scaffold(
+      backgroundColor: Colors.grey[50],
       appBar: AppBar(
-        title: const Text('Find Friends', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+        title: const Text('Find Friends',
+            style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
         backgroundColor: Colors.transparent,
         elevation: 0,
         centerTitle: true,
         actions: [
           TextButton(
-            // FIX: Changed '/home' to '/chat-list' to match main.dart
-            onPressed: () => Navigator.of(context).pushReplacementNamed('/chat-list'),
-            child: const Text('Skip', style: TextStyle(fontWeight: FontWeight.bold)),
+            onPressed: () =>
+                Navigator.of(context).pushReplacementNamed('/chat-list'),
+            child: const Text('Skip',
+                style: TextStyle(fontWeight: FontWeight.bold)),
           ),
         ],
       ),
@@ -87,18 +101,20 @@ class _SuggestedFriendsScreenState extends State<SuggestedFriendsScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding: const EdgeInsets.all(20.0),
+            padding: const EdgeInsets.fromLTRB(20, 4, 20, 16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Suggestions for you',
-                  style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+                  'People you may know',
+                  style: theme.textTheme.headlineSmall
+                      ?.copyWith(fontWeight: FontWeight.bold),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 6),
                 Text(
-                  'Add people to start chatting and sharing moments.',
-                  style: theme.textTheme.bodyMedium?.copyWith(color: Colors.grey[600]),
+                  'Send a friend request to start chatting.',
+                  style: theme.textTheme.bodyMedium
+                      ?.copyWith(color: Colors.grey[600]),
                 ),
               ],
             ),
@@ -112,19 +128,32 @@ class _SuggestedFriendsScreenState extends State<SuggestedFriendsScreen> {
                         padding: const EdgeInsets.symmetric(horizontal: 16),
                         itemCount: _suggestions.length,
                         itemBuilder: (context, index) {
-                          final user = _suggestions[index];
-                          final isAdded = _addedUserIds.contains(user.id);
+                          final raw = _suggestions[index];
+                          final userId = raw['id'] as int? ?? 0;
+                          final username = raw['username'] as String? ?? '';
+                          final firstName = raw['first_name'] as String? ?? '';
+                          final lastName = raw['last_name'] as String? ?? '';
+                          final mutualCount =
+                              raw['mutual_friends'] as int? ?? 0;
+                          final isAdded = _addedUserIds.contains(userId);
+                          final displayName =
+                              (firstName.isNotEmpty || lastName.isNotEmpty)
+                                  ? '$firstName $lastName'.trim()
+                                  : null;
+                          final initial = username.trim().isNotEmpty
+                              ? username.trim()[0].toUpperCase()
+                              : '?';
 
                           return Container(
                             margin: const EdgeInsets.only(bottom: 12),
-                            padding: const EdgeInsets.all(12),
+                            padding: const EdgeInsets.all(14),
                             decoration: BoxDecoration(
                               color: Colors.white,
-                              borderRadius: BorderRadius.circular(16),
+                              borderRadius: BorderRadius.circular(18),
                               boxShadow: [
                                 BoxShadow(
-                                  color: Colors.black.withOpacity(0.03),
-                                  blurRadius: 10,
+                                  color: Colors.black.withOpacity(0.04),
+                                  blurRadius: 12,
                                   offset: const Offset(0, 4),
                                 ),
                               ],
@@ -133,31 +162,78 @@ class _SuggestedFriendsScreenState extends State<SuggestedFriendsScreen> {
                               children: [
                                 CircleAvatar(
                                   radius: 28,
-                                  backgroundColor: primaryColor.withOpacity(0.1),
-                                  child: Text(user.username[0].toUpperCase(),
-                                      style: TextStyle(color: primaryColor, fontWeight: FontWeight.bold)),
+                                  backgroundColor:
+                                      primaryColor.withOpacity(0.12),
+                                  child: Text(
+                                    initial,
+                                    style: TextStyle(
+                                        color: primaryColor,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 20),
+                                  ),
                                 ),
-                                const SizedBox(width: 16),
+                                const SizedBox(width: 14),
                                 Expanded(
                                   child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
-                                      Text(user.username, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                                      if (user.firstName.isNotEmpty)
-                                        Text('${user.firstName} ${user.lastName}',
-                                            style: TextStyle(color: Colors.grey[600], fontSize: 14)),
+                                      Text(username,
+                                          style: const TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 16)),
+                                      if (displayName != null)
+                                        Text(displayName,
+                                            style: TextStyle(
+                                                color: Colors.grey[600],
+                                                fontSize: 13)),
+                                      const SizedBox(height: 3),
+                                      Row(
+                                        children: [
+                                          Icon(Icons.people_outline,
+                                              size: 13,
+                                              color: mutualCount > 0
+                                                  ? primaryColor
+                                                  : Colors.grey[400]),
+                                          const SizedBox(width: 4),
+                                          Text(
+                                            mutualCount > 0
+                                                ? '$mutualCount mutual friend${mutualCount > 1 ? 's' : ''}'
+                                                : 'Suggested for you',
+                                            style: TextStyle(
+                                              fontSize: 12,
+                                              color: mutualCount > 0
+                                                  ? primaryColor
+                                                  : Colors.grey[500],
+                                              fontWeight: mutualCount > 0
+                                                  ? FontWeight.w600
+                                                  : FontWeight.normal,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
                                     ],
                                   ),
                                 ),
+                                const SizedBox(width: 8),
                                 ElevatedButton(
-                                  onPressed: isAdded ? null : () => _sendRequest(user.id),
+                                  onPressed: isAdded
+                                      ? null
+                                      : () => _sendRequest(userId),
                                   style: ElevatedButton.styleFrom(
-                                    backgroundColor: isAdded ? Colors.grey[200] : primaryColor,
-                                    foregroundColor: isAdded ? Colors.grey : Colors.white,
+                                    backgroundColor: isAdded
+                                        ? Colors.grey[200]
+                                        : primaryColor,
+                                    foregroundColor:
+                                        isAdded ? Colors.grey : Colors.white,
                                     elevation: 0,
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 16, vertical: 10),
+                                    shape: RoundedRectangleBorder(
+                                        borderRadius:
+                                            BorderRadius.circular(12)),
                                   ),
-                                  child: Text(isAdded ? 'Sent' : 'Add'),
+                                  child: Text(isAdded ? '✓ Sent' : 'Add'),
                                 ),
                               ],
                             ),
@@ -171,13 +247,16 @@ class _SuggestedFriendsScreenState extends State<SuggestedFriendsScreen> {
               width: double.infinity,
               height: 54,
               child: ElevatedButton(
-                // FIX: Changed '/home' to '/chat-list' to match main.dart
-                onPressed: () => Navigator.of(context).pushReplacementNamed('/chat-list'),
+                onPressed: () =>
+                    Navigator.of(context).pushReplacementNamed('/chat-list'),
                 style: ElevatedButton.styleFrom(
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16)),
                   elevation: 0,
                 ),
-                child: const Text('Go to Chats', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                child: const Text('Go to Chats',
+                    style:
+                        TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
               ),
             ),
           ),
@@ -193,9 +272,23 @@ class _SuggestedFriendsScreenState extends State<SuggestedFriendsScreen> {
         children: [
           Icon(Icons.people_outline, size: 80, color: Colors.grey[300]),
           const SizedBox(height: 20),
-          const Text('No suggestions found', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+          const Text('No suggestions right now',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
           const SizedBox(height: 8),
-          const Text('Check back later for more people to connect with.', textAlign: TextAlign.center),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 40),
+            child: Text(
+              'As more people join, they will appear here.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.grey),
+            ),
+          ),
+          const SizedBox(height: 24),
+          TextButton.icon(
+            onPressed: _loadSuggestions,
+            icon: const Icon(Icons.refresh),
+            label: const Text('Refresh'),
+          ),
         ],
       ),
     );

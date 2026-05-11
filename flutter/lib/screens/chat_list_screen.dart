@@ -34,10 +34,14 @@ class _ChatListScreenState extends State<ChatListScreen> {
   void initState() {
     super.initState();
     // Use microtask to avoid "setState during build" error
-    Future.microtask(() => _loadInitialData());
+    Future.microtask(() {
+      if (!mounted) return;
+      _loadInitialData();
+    });
   }
 
   Future<void> _loadInitialData() async {
+    if (!mounted) return;
     setState(() => _isLoading = true);
     final roomProvider = Provider.of<RoomProvider>(context, listen: false);
     final apiService = ApiService();
@@ -45,6 +49,8 @@ class _ChatListScreenState extends State<ChatListScreen> {
     try {
       await roomProvider.loadRooms();
       final user = await apiService.getCurrentUser();
+      if (!mounted) return;
+      roomProvider.setCurrentUserId(user.id);
       setState(() {
         _currentUser = user;
         _userId = user.id;
@@ -52,23 +58,35 @@ class _ChatListScreenState extends State<ChatListScreen> {
         _isLoading = false;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() => _isLoading = false);
       print('✗ Failed to load data: $e');
     }
   }
 
   void _logout() async {
+    if (!mounted) return;
+
+    // 1. Capture the navigator and auth provider before any async work
+    final navigator = Navigator.of(context);
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+
     try {
-      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+      // 2. Clear tokens locally and navigate immediately for better UX
+      // We don't want to wait for the API if it's slow or failing
       await authProvider.logout();
-      if (mounted) {
-        Navigator.of(context).pushReplacementNamed('/auth');
-      }
+
+      if (!mounted) return;
+
+      // 3. Use the captured navigator to go back to auth
+      navigator.pushNamedAndRemoveUntil('/auth', (route) => false);
+
+      print('✓ Logout successful and navigated to login');
     } catch (e) {
-      print('✗ Logout failed: $e');
-      if (mounted) {
-        Navigator.of(context).pushReplacementNamed('/auth');
-      }
+      print('✗ Logout error (navigating anyway): $e');
+      if (!mounted) return;
+      // Even if the API fails, we should clear local state and go to login
+      navigator.pushNamedAndRemoveUntil('/auth', (route) => false);
     }
   }
 
@@ -93,7 +111,8 @@ class _ChatListScreenState extends State<ChatListScreen> {
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
-              onRefresh: () => Provider.of<RoomProvider>(context, listen: false).loadRooms(),
+              onRefresh: () =>
+                  Provider.of<RoomProvider>(context, listen: false).loadRooms(),
               child: SingleChildScrollView(
                 physics: const AlwaysScrollableScrollPhysics(),
                 child: Column(
@@ -114,7 +133,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
       builder: (context, roomProvider, _) {
         // Show all active rooms (Groups and DMs) in the top circle list
         final rooms = roomProvider.rooms;
-        
+
         return Container(
           height: 110,
           margin: const EdgeInsets.symmetric(vertical: 10),
@@ -132,7 +151,8 @@ class _ChatListScreenState extends State<ChatListScreen> {
                       GestureDetector(
                         onTap: () => Navigator.push(
                           context,
-                          MaterialPageRoute(builder: (_) => CreateGroupScreen()),
+                          MaterialPageRoute(
+                              builder: (_) => CreateGroupScreen()),
                         ),
                         child: Container(
                           width: 65,
@@ -153,7 +173,8 @@ class _ChatListScreenState extends State<ChatListScreen> {
                         ),
                       ),
                       const SizedBox(height: 8),
-                      const Text('New', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                      const Text('New',
+                          style: TextStyle(fontSize: 12, color: Colors.grey)),
                     ],
                   ),
                 );
@@ -161,9 +182,11 @@ class _ChatListScreenState extends State<ChatListScreen> {
 
               final room = rooms[index - 1];
               final isGroup = room.roomType == 'GROUP';
-              final String displayName = isGroup 
-                  ? room.name 
-                  : (room.otherParticipantName.isNotEmpty ? room.otherParticipantName : room.name);
+              final String displayName = isGroup
+                  ? room.name
+                  : (room.otherParticipantName.isNotEmpty
+                      ? room.otherParticipantName
+                      : room.name);
 
               return Padding(
                 padding: const EdgeInsets.only(right: 15),
@@ -171,7 +194,8 @@ class _ChatListScreenState extends State<ChatListScreen> {
                   children: [
                     GestureDetector(
                       onTap: () {
-                        final chatProvider = Provider.of<ChatProvider>(context, listen: false);
+                        final chatProvider =
+                            Provider.of<ChatProvider>(context, listen: false);
                         Navigator.push(
                           context,
                           MaterialPageRoute(
@@ -182,7 +206,9 @@ class _ChatListScreenState extends State<ChatListScreen> {
                                 roomName: displayName,
                                 userId: _userId ?? 0,
                                 username: _username,
-                                friendId: isGroup ? 0 : (room.otherParticipantId ?? 0),
+                                friendId: isGroup
+                                    ? 0
+                                    : (room.otherParticipantId ?? 0),
                                 isGroup: isGroup,
                               ),
                             ),
@@ -193,7 +219,9 @@ class _ChatListScreenState extends State<ChatListScreen> {
                         width: 65,
                         height: 65,
                         decoration: BoxDecoration(
-                          color: isGroup ? primaryColor.withOpacity(0.1) : Colors.grey[100],
+                          color: isGroup
+                              ? primaryColor.withOpacity(0.1)
+                              : Colors.grey[100],
                           shape: BoxShape.circle,
                           border: Border.all(color: Colors.white, width: 2),
                           boxShadow: [
@@ -205,29 +233,36 @@ class _ChatListScreenState extends State<ChatListScreen> {
                           ],
                         ),
                         child: ClipOval(
-                          child: isGroup 
-                            ? Center(
-                                child: Text(
-                                  displayName.trim().isNotEmpty ? displayName.trim()[0].toUpperCase() : '?',
-                                  style: TextStyle(
-                                    color: primaryColor,
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 20,
-                                  ),
-                                ),
-                              )
-                            : (room.otherParticipantAvatar != null 
-                                ? Image.network(room.otherParticipantAvatar!, fit: BoxFit.cover)
-                                : Center(
-                                    child: Text(
-                                      displayName.trim().isNotEmpty ? displayName.trim()[0].toUpperCase() : '?',
-                                      style: TextStyle(
-                                        color: Colors.grey[700],
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 20,
-                                      ),
+                          child: isGroup
+                              ? Center(
+                                  child: Text(
+                                    displayName.trim().isNotEmpty
+                                        ? displayName.trim()[0].toUpperCase()
+                                        : '?',
+                                    style: TextStyle(
+                                      color: primaryColor,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 20,
                                     ),
-                                  )),
+                                  ),
+                                )
+                              : (room.otherParticipantAvatar != null
+                                  ? Image.network(room.otherParticipantAvatar!,
+                                      fit: BoxFit.cover)
+                                  : Center(
+                                      child: Text(
+                                        displayName.trim().isNotEmpty
+                                            ? displayName
+                                                .trim()[0]
+                                                .toUpperCase()
+                                            : '?',
+                                        style: TextStyle(
+                                          color: Colors.grey[700],
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 20,
+                                        ),
+                                      ),
+                                    )),
                         ),
                       ),
                     ),
@@ -237,7 +272,8 @@ class _ChatListScreenState extends State<ChatListScreen> {
                       child: Text(
                         displayName,
                         textAlign: TextAlign.center,
-                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                        style: const TextStyle(
+                            fontSize: 12, fontWeight: FontWeight.w500),
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
@@ -270,14 +306,16 @@ class _ChatListScreenState extends State<ChatListScreen> {
               decoration: BoxDecoration(
                 color: isSelected ? primaryColor : Colors.white,
                 borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: isSelected ? primaryColor : Colors.grey[200]!),
+                border: Border.all(
+                    color: isSelected ? primaryColor : Colors.grey[200]!),
               ),
               child: Center(
                 child: Text(
                   tabs[index],
                   style: TextStyle(
                     color: isSelected ? Colors.white : Colors.grey[600],
-                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                    fontWeight:
+                        isSelected ? FontWeight.bold : FontWeight.normal,
                   ),
                 ),
               ),
@@ -320,33 +358,59 @@ class _ChatListScreenState extends State<ChatListScreen> {
     return Consumer<RoomProvider>(
       builder: (context, roomProvider, _) {
         List<ChatRoom> rooms = roomProvider.rooms;
-        
+
         // Apply tab filtering
-        if (_selectedTabIndex == 1) { // Unread
+        if (_selectedTabIndex == 1) {
+          // Unread
           rooms = rooms.where((r) => r.unreadCount > 0).toList();
-        } else if (_selectedTabIndex == 2) { // Groups
+        } else if (_selectedTabIndex == 2) {
+          // Groups
           rooms = rooms.where((r) => r.roomType == 'GROUP').toList();
-        } else if (_selectedTabIndex == 3) { // Favorites
+        } else if (_selectedTabIndex == 3) {
+          // Favorites
           rooms = []; // Not implemented yet
         }
 
         if (_searchQuery.isNotEmpty) {
-          rooms = rooms.where((r) => r.name.toLowerCase().contains(_searchQuery.toLowerCase())).toList();
+          rooms = rooms
+              .where((r) =>
+                  r.name.toLowerCase().contains(_searchQuery.toLowerCase()))
+              .toList();
         }
 
         if (rooms.isEmpty) {
+          String emptyTitle = "You haven't any friends as of now";
+          String emptySubtitle =
+              "Add more people to chat and start sharing your moments!";
+          bool showActionButton = true;
+
+          if (_selectedTabIndex == 1) {
+            // Unread
+            emptyTitle = "You have read all of your messages";
+            emptySubtitle = "Keep up the good work! You're all caught up.";
+            showActionButton = false;
+          } else if (_selectedTabIndex == 3) {
+            // Favorites
+            emptyTitle = "You have no favourites as of now";
+            emptySubtitle = "Star your favorite people to see them here first.";
+            showActionButton = false;
+          }
+
           return Padding(
             padding: const EdgeInsets.only(top: 100),
             child: EmptyChat(
-              title: "You haven't any friends as of now",
-              subtitle: "Add more people to chat and start sharing your moments!",
-              actionLabel: "Find People",
-              onAction: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const SuggestedFriendsScreen()),
-                );
-              },
+              title: emptyTitle,
+              subtitle: emptySubtitle,
+              actionLabel: showActionButton ? "Find People" : null,
+              onAction: showActionButton
+                  ? () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => const SuggestedFriendsScreen()),
+                      );
+                    }
+                  : null,
             ),
           );
         }

@@ -108,6 +108,7 @@ class _LoginPageState extends State<LoginPage> {
         'userId': response.user.id,
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _error = e.toString().replaceAll('Exception: ', '');
         _isLoading = false;
@@ -276,7 +277,8 @@ class _RegisterPageState extends State<RegisterPage> {
       return;
     }
 
-    if (_passwordController.text.trim() != _confirmPasswordController.text.trim()) {
+    if (_passwordController.text.trim() !=
+        _confirmPasswordController.text.trim()) {
       setState(() => _error = 'Passwords do not match');
       return;
     }
@@ -302,13 +304,16 @@ class _RegisterPageState extends State<RegisterPage> {
       if (!mounted) return;
 
       // Tokens are saved by ApiService; navigate directly to chat list
-      SnackbarUtils.showSuccess(context, 'Registration successful! Logging you in...');
+      SnackbarUtils.showSuccess(
+          context, 'Registration successful! Logging you in...');
 
-      Navigator.of(context).pushReplacementNamed('/suggested-friends', arguments: {
+      Navigator.of(context)
+          .pushReplacementNamed('/suggested-friends', arguments: {
         'username': authResponse.user.username,
         'userId': authResponse.user.id,
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _error = e.toString().replaceAll('Exception: ', '');
         _isLoading = false;

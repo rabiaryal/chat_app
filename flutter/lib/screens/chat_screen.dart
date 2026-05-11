@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/chat_provider.dart';
+import '../providers/room_provider.dart';
 import '../widgets/chat_bubble.dart';
 import '../widgets/chat/chat_header.dart';
 import '../widgets/chat/chat_input.dart';
@@ -35,11 +36,22 @@ class _ChatScreenState extends State<ChatScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<ChatProvider>().initialize(
-            roomId: widget.roomId,
-            userId: widget.userId,
-            username: widget.username,
-          );
+      final chatProvider = context.read<ChatProvider>();
+      final roomProvider = context.read<RoomProvider>();
+
+      // Initialize chat provider (loads messages, setup UI)
+      chatProvider.initialize(
+        roomId: widget.roomId,
+        userId: widget.userId,
+        username: widget.username,
+      );
+
+      // Mark room as read (fire and forget, non-blocking)
+      Future.delayed(Duration.zero, () {
+        if (mounted) {
+          roomProvider.markRoomAsRead(widget.roomId);
+        }
+      });
     });
   }
 
@@ -81,12 +93,14 @@ class _ChatScreenState extends State<ChatScreen> {
                   return const Center(child: CircularProgressIndicator());
                 }
 
-                if (chatProvider.error != null && chatProvider.messages.isEmpty) {
+                if (chatProvider.error != null &&
+                    chatProvider.messages.isEmpty) {
                   return Center(
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        const Icon(Icons.error_outline, size: 48, color: Colors.red),
+                        const Icon(Icons.error_outline,
+                            size: 48, color: Colors.red),
                         const SizedBox(height: 16),
                         Text('Error: ${chatProvider.error}'),
                         const SizedBox(height: 16),
@@ -103,7 +117,8 @@ class _ChatScreenState extends State<ChatScreen> {
                   return EmptyChat(roomName: widget.roomName);
                 }
 
-                WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+                WidgetsBinding.instance
+                    .addPostFrameCallback((_) => _scrollToBottom());
 
                 return ListView.builder(
                   controller: _scrollController,
@@ -113,7 +128,8 @@ class _ChatScreenState extends State<ChatScreen> {
                     if (index == chatProvider.messages.length &&
                         chatProvider.typingIndicator != null) {
                       return TypingIndicator(
-                        username: chatProvider.typingIndicator?.username ?? 'AI Assistant',
+                        username: chatProvider.typingIndicator?.username ??
+                            'AI Assistant',
                         isBot: true,
                       );
                     }
@@ -122,8 +138,8 @@ class _ChatScreenState extends State<ChatScreen> {
                     final isCurrentUser = message.userId == widget.userId;
 
                     // Mark incoming messages as read ONLY if they are not already seen
-                    if (!isCurrentUser && 
-                        !message.isBot && 
+                    if (!isCurrentUser &&
+                        !message.isBot &&
                         message.status != MessageStatus.read) {
                       WidgetsBinding.instance.addPostFrameCallback((_) {
                         chatProvider.markAsRead(message.id);
