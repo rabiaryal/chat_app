@@ -3,12 +3,16 @@ Django settings for chat_project project.
 """
 
 import os
+import logging
 from datetime import timedelta
 from pathlib import Path
 from decouple import config
+import firebase_admin
+from firebase_admin import credentials
 
 # Build paths inside the project
 BASE_DIR = Path(__file__).resolve().parent.parent
+logger = logging.getLogger(__name__)
 
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = config('SECRET_KEY', default='django-insecure-change-me-in-production')
@@ -31,6 +35,7 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt.token_blacklist',
     'corsheaders',
     'drf_spectacular',
+    'fcm_django',
     'chat_app',
 ]
 
@@ -207,6 +212,35 @@ CHANNEL_LAYERS = {
 
 # Custom User Model
 AUTH_USER_MODEL = 'chat_app.CustomUser'
+
+# Firebase Cloud Messaging (FCM) configuration
+FCM_ENABLED = config('FCM_ENABLED', default=False, cast=bool)
+FIREBASE_CREDENTIALS_FILE = config('FIREBASE_CREDENTIALS_FILE', default='')
+
+FCM_DJANGO_SETTINGS = {
+    'DEFAULT_FIREBASE_APP': None,
+    'APP_VERBOSE_NAME': 'Firebase Cloud Messaging',
+    # Data-only notifications for E2EE-safe push handling
+    'ONE_DEVICE_PER_USER': False,
+}
+
+if FCM_ENABLED:
+    if FIREBASE_CREDENTIALS_FILE:
+        try:
+            cred_path = Path(FIREBASE_CREDENTIALS_FILE)
+            if not cred_path.is_absolute():
+                cred_path = BASE_DIR / FIREBASE_CREDENTIALS_FILE
+
+            if cred_path.exists():
+                if not firebase_admin._apps:
+                    cred = credentials.Certificate(str(cred_path))
+                    firebase_admin.initialize_app(cred)
+            else:
+                logger.warning('FCM enabled but credential file not found at %s', cred_path)
+        except Exception as exc:
+            logger.exception('Failed to initialize Firebase Admin SDK: %s', exc)
+    else:
+        logger.warning('FCM_ENABLED=True but FIREBASE_CREDENTIALS_FILE is not set')
 
 # Logging Configuration
 LOGGING = {

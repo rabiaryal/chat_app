@@ -6,6 +6,7 @@ from asgiref.sync import sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
 
 from .models import ChatRoom, CustomUser, Message
+from .notifications import send_new_message_push
 
 
 class ChatConsumer(AsyncWebsocketConsumer):
@@ -27,6 +28,24 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
         await self.channel_layer.group_add(self.group_name, self.channel_name)
         await self.accept()
+
+        try:
+            # Send unread messages to the user upon connection
+            unread_messages = await self._get_unread_messages(self.room_id, self.user.id)
+            for msg in unread_messages:
+                payload = {
+                    "type": "text_message",
+                    "message_id": msg["id"],
+                    "text": msg["content"],
+                    "user_id": msg["sender_id"],
+                    "username": msg["sender_username"],
+                    "room_id": self.room_id,
+                    "timestamp": msg["created_at"].isoformat(),
+                    "status": "delivered"
+                }
+                await self.send(text_data=json.dumps(payload))
+        except Exception as e:
+            print(f"Error sending unread messages: {e}")
 
         await self.channel_layer.group_send(
             self.group_name,
@@ -118,6 +137,30 @@ class ChatConsumer(AsyncWebsocketConsumer):
                     "payload": payload,
                 },
             )
+
+            await self._send_push_notification("SECURE")
+            return
+
+        if msg_type == "mark_read":
+            message_id = data.get("message_id")
+            if message_id:
+                await self._mark_message_as_read(message_id)
+                await self.channel_layer.group_send(
+                    self.group_name,
+                    {
+                        "type": "chat.event",
+                        "payload": {
+                            "type": "message_read",
+                            "message_id": message_id,
+                            "user_id": self.user.id,
+                        },
+                    },
+                )
+            return
+
+        if msg_type not in ["text_message", "ai_request"]:
+            # If we reach here, it's an unknown type that wasn't caught by handlers above
+            print(f"⚠ Received unknown message type: {msg_type}")
             return
 
         text = (data.get("text") or data.get("content") or "").strip()
@@ -134,9 +177,8 @@ class ChatConsumer(AsyncWebsocketConsumer):
             return
 
         message_type = "AI_RESPONSE" if msg_type == "ai_request" else "TEXT"
-        message_id = f"{self.room_id}_{self.user.id}_{uuid.uuid4().hex[:12]}"
-
-        await self._save_message(self.room_id, self.user.id, text, message_type)
+        
+        message_id = await self._save_message(self.room_id, self.user.id, text, message_type)
 
         payload = {
             "type": "text_message" if msg_type == "ai_request" else msg_type,
@@ -154,6 +196,8 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 "payload": payload,
             },
         )
+
+        await self._send_push_notification(message_type)
 
     async def chat_event(self, event):
         await self.send(text_data=json.dumps(event["payload"]))
@@ -194,10 +238,50 @@ class ChatConsumer(AsyncWebsocketConsumer):
     def _save_message(self, room_id, user_id, content, message_type):
         room = ChatRoom.objects.get(id=room_id)
         sender = CustomUser.objects.get(id=user_id)
-        Message.objects.create(
+        msg = Message.objects.create(
             id=str(uuid.uuid4()),
             room=room,
             sender=sender,
             content=content,
+            message_type=message_type,
+        )
+        return msg.id
+
+    @sync_to_async
+    def _get_unread_messages(self, room_id, user_id):
+        # Fetch messages in this room that weren't sent by the user and are not yet read
+        # Note: In this simple implementation, 'is_read' is global. 
+        # For a production system, you'd need a through-table for per-user read status.
+        messages = Message.objects.filter(
+            room_id=room_id,
+            is_read=False
+        ).select_related('sender').exclude(sender_id=user_id).order_by('created_at')
+        
+        return [
+            {
+                "id": m.id,
+                "content": m.content,
+                "sender_id": m.sender.id,
+                "sender_username": m.sender.username,
+                "created_at": m.created_at,
+            }
+            for m in messages
+        ]
+
+    @sync_to_async
+    def _mark_message_as_read(self, message_id):
+        try:
+            message = Message.objects.get(id=message_id)
+            message.is_read = True
+            message.save()
+        except Message.DoesNotExist:
+            pass
+
+    @sync_to_async
+    def _send_push_notification(self, message_type):
+        send_new_message_push(
+            room_id=self.room_id,
+            sender_id=self.user.id,
+            sender_username=self.user.username,
             message_type=message_type,
         )

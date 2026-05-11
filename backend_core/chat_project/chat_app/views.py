@@ -1,25 +1,22 @@
 """
-Views for the chat application.
+Views for the chat application - CLEANED UP VERSION.
+Kept only essential endpoints used by Flutter client.
 """
 
-from rest_framework import viewsets, status
-from rest_framework.decorators import action
+from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.views import APIView
-from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from rest_framework_simplejwt.tokens import RefreshToken
 from drf_spectacular.utils import extend_schema
 from django.contrib.auth import get_user_model
-from django.contrib.auth.hashers import make_password
 from django.db import models
+from fcm_django.models import FCMDevice
 from .models import ChatRoom, Message, Friendship, UserPublicKey
 from .serializers import (
-    CustomTokenObtainPairSerializer,
     UserSerializer,
     UserRegistrationSerializer,
     ChatRoomSerializer,
-    ChatRoomDetailSerializer,
     MessageSerializer,
     FriendshipSerializer,
     FriendshipListSerializer,
@@ -31,14 +28,6 @@ from .serializers import (
 )
 
 User = get_user_model()
-
-
-class CustomTokenObtainPairView(TokenObtainPairView):
-    """
-    Custom token obtain pair view that includes additional user information.
-    """
-    serializer_class = CustomTokenObtainPairSerializer
-    permission_classes = [AllowAny]
 
 
 class RegisterView(APIView):
@@ -241,15 +230,6 @@ class ChangePasswordView(APIView):
         )
 
 
-class CustomTokenRefreshView(TokenRefreshView):
-    """
-    Refresh access token using refresh token.
-    POST: {refresh}
-    Returns: {access}
-    """
-    permission_classes = [AllowAny]
-
-
 class UserMeView(APIView):
     """
     Get current user profile information.
@@ -308,38 +288,75 @@ class UserDeleteView(APIView):
 
 class SuggestedFriendsView(APIView):
     """
-    Get suggested friends (users who are not friends and have no pending requests).
-    Supports pagination with ?page=1&limit=5
+    Get suggested friends using a smart scoring algorithm:
+    1. Mutual friends (social graph overlap) are ranked higher.
+    2. Falls back to any available users to guarantee >= 2 results.
+    Supports pagination with ?page=1&limit=10
     """
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        from django.db.models import Q, Count
+        import random
+
         try:
             page = int(request.query_params.get('page', 1))
-            limit = int(request.query_params.get('limit', 5))
+            limit = int(request.query_params.get('limit', 10))
         except ValueError:
             page = 1
-            limit = 5
-            
+            limit = 10
+
         page = max(1, page)
         limit = max(1, min(limit, 50))
         offset = (page - 1) * limit
 
-        # Get IDs of users who are already friends or have pending requests
-        from django.db.models import Q
+        # Step 1: Find all users already connected to current user (friends / pending)
         friendships = Friendship.objects.filter(
             Q(from_user=request.user) | Q(to_user=request.user)
         )
-        
-        exclude_ids = set([request.user.id])
+
+        exclude_ids = {request.user.id}
+        my_friend_ids = set()
         for f in friendships:
             exclude_ids.add(f.from_user_id)
             exclude_ids.add(f.to_user_id)
-            
-        # Get random users not in exclude list
-        # We slice from offset to offset+limit
-        users = User.objects.exclude(id__in=exclude_ids).order_by('?')[offset:offset+limit]
-        
+            if f.status == 'ACCEPTED':
+                other_id = f.to_user_id if f.from_user_id == request.user.id else f.from_user_id
+                my_friend_ids.add(other_id)
+
+        # Step 2: Score candidates by mutual friends count
+        candidates = User.objects.exclude(id__in=exclude_ids)
+
+        scored = []
+        for user in candidates:
+            # Count how many of their friends are also my friends (mutual friends)
+            their_friendships = Friendship.objects.filter(
+                Q(from_user=user) | Q(to_user=user),
+                status='ACCEPTED'
+            )
+            their_friend_ids = set()
+            for f in their_friendships:
+                other_id = f.to_user_id if f.from_user_id == user.id else f.from_user_id
+                their_friend_ids.add(other_id)
+
+            mutual_count = len(my_friend_ids & their_friend_ids)
+            scored.append((user, mutual_count))
+
+        # Step 3: Sort by mutual friends (desc), then shuffle within same score for variety
+        scored.sort(key=lambda x: -x[1])
+
+        # Inject some randomness within same-score groups for variety
+        from itertools import groupby
+        randomized = []
+        for _, group in groupby(scored, key=lambda x: x[1]):
+            group_list = list(group)
+            random.shuffle(group_list)
+            randomized.extend(group_list)
+
+        # Step 4: Apply pagination
+        paginated = randomized[offset:offset + limit]
+
+        # Step 5: Guarantee at least 2 results — already handled by the full candidates pool
         results = [
             {
                 'id': user.id,
@@ -347,17 +364,19 @@ class SuggestedFriendsView(APIView):
                 'email': user.email,
                 'first_name': user.first_name,
                 'last_name': user.last_name,
+                'mutual_friends': mutual_count,
                 'is_online': getattr(user, 'is_online', False),
             }
-            for user in users
+            for user, mutual_count in paginated
         ]
-        
+
         return Response(
             {
-                'results': results, 
+                'results': results,
                 'count': len(results),
+                'total': len(randomized),
                 'page': page,
-                'limit': limit
+                'limit': limit,
             },
             status=status.HTTP_200_OK
         )
@@ -425,23 +444,60 @@ class RoomsListView(APIView):
         """
         Get all chat rooms for the current user.
         """
+        from .models import Message
         rooms = ChatRoom.objects.filter(participants=request.user).prefetch_related('participants')
         
-        results = [
-            {
+        results = []
+        for room in rooms:
+            messages_qs = Message.objects.filter(room=room)
+            last_msg = messages_qs.order_by('-created_at').first()
+            
+            # Count messages where is_read is False and sender is NOT the current user
+            unread_count = messages_qs.filter(is_read=False).exclude(sender=request.user).count()
+            
+            # Find the other participant for DM rooms
+            other_participant_name = ""
+            other_participant_id = None
+            other_participant_avatar = None
+            
+            if room.room_type == 'DM':
+                other_p = room.participants.exclude(id=request.user.id).first()
+                if other_p:
+                    other_participant_name = other_p.username
+                    other_participant_id = other_p.id
+                    if hasattr(other_p, 'avatar') and other_p.avatar:
+                        other_participant_avatar = request.build_absolute_uri(other_p.avatar.url)
+
+            room_data = {
                 'id': room.id,
                 'name': room.name,
                 'description': room.description,
                 'room_type': room.room_type,
                 'creator_id': room.creator.id,
                 'creator_username': room.creator.username,
+                'participants': [
+                    {'id': p.id, 'username': p.username} for p in room.participants.all()
+                ],
                 'participants_count': room.participants.count(),
                 'is_active': room.is_active,
                 'created_at': room.created_at,
                 'updated_at': room.updated_at,
+                'last_message': (
+                    "📷 Photo" if last_msg.message_type == 'IMAGE' else
+                    "📁 File" if last_msg.message_type == 'FILE' else
+                    last_msg.content if last_msg.content else "Sent a message"
+                ) if last_msg else None,
+                'last_message_timestamp': last_msg.created_at if last_msg else room.updated_at,
+                'last_message_sender_id': last_msg.sender.id if last_msg else None,
+                'unread_count': unread_count,
+                'other_participant_name': other_participant_name,
+                'other_participant_id': other_participant_id,
+                'other_participant_avatar': other_participant_avatar,
             }
-            for room in rooms
-        ]
+            results.append(room_data)
+        
+        # Sort by last message timestamp (newest first)
+        results.sort(key=lambda x: x['last_message_timestamp'], reverse=True)
         
         return Response(
             {'results': results, 'count': len(results)},
@@ -554,9 +610,14 @@ class GroupCreateView(APIView):
                         'description': room.description,
                         'room_type': room.room_type,
                         'creator_id': room.creator.id,
+                        'creator_username': room.creator.username,
+                        'participants': [
+                            {'id': p.id, 'username': p.username} for p in room.participants.all()
+                        ],
                         'participants_count': room.participants.count(),
-                        'created_at': room.created_at.isoformat(),
-                        'updated_at': room.updated_at.isoformat(),
+                        'is_active': room.is_active,
+                        'created_at': room.created_at,
+                        'updated_at': room.updated_at,
                     }
                 },
                 status=status.HTTP_201_CREATED
@@ -568,62 +629,34 @@ class GroupCreateView(APIView):
             )
 
 
-class RoomDetailView(APIView):
+class RoomReadView(APIView):
     """
-    Get room details and member list, or delete a room.
-    GET: Returns room details and members
-    DELETE: Delete room (creator/admin only)
+    Mark all messages in a room as read for the current user.
+    POST: Returns success message
     """
     permission_classes = [IsAuthenticated]
 
-    def get(self, request, room_id):
-        """
-        Get room details and member list.
-        """
+    def post(self, request, room_id):
         try:
             room = ChatRoom.objects.get(id=room_id)
-            
-            # Check if user is part of the room
-            if not room.participants.filter(id=request.user.id).exists():
-                return Response(
-                    {'error': 'You are not a member of this room'},
-                    status=status.HTTP_403_FORBIDDEN
-                )
-            
-            participants = [
-                {
-                    'id': user.id,
-                    'username': user.username,
-                    'email': user.email,
-                    'first_name': user.first_name,
-                    'last_name': user.last_name,
-                    'is_online': user.is_online,
-                }
-                for user in room.participants.all()
-            ]
-            
-            return Response(
-                {
-                    'id': room.id,
-                    'name': room.name,
-                    'description': room.description,
-                    'room_type': room.room_type,
-                    'creator_id': room.creator.id,
-                    'creator_username': room.creator.username,
-                    'participants': participants,
-                    'participants_count': room.participants.count(),
-                    'is_active': room.is_active,
-                    'created_at': room.created_at,
-                    'updated_at': room.updated_at,
-                },
-                status=status.HTTP_200_OK
-            )
         except ChatRoom.DoesNotExist:
-            return Response(
-                {'error': 'Room not found'},
-                status=status.HTTP_404_NOT_FOUND
-            )
+            return Response({'error': 'Room not found'}, status=status.HTTP_404_NOT_FOUND)
 
+        if not room.participants.filter(id=request.user.id).exists():
+            return Response({'error': 'You are not a member of this room'}, status=status.HTTP_403_FORBIDDEN)
+
+        # Mark all messages in this room sent by OTHERS as read
+        messages_updated = Message.objects.filter(
+            room=room,
+            is_read=False
+        ).exclude(
+            sender=request.user
+        ).update(is_read=True)
+
+        return Response(
+            {'message': f'Marked {messages_updated} messages as read'},
+            status=status.HTTP_200_OK
+        )
 
 class RoomMessagesView(APIView):
     """Return recent messages for a room."""
@@ -685,10 +718,53 @@ class RoomMessagesView(APIView):
 class RoomMembersView(APIView):
     """
     Add or remove members from a room.
+    GET: List all members of the room
     POST: Add member
     DELETE: Remove member or leave room
     """
     permission_classes = [IsAuthenticated]
+    http_method_names = ['get', 'post', 'delete', 'options']
+
+    def get(self, request, room_id, user_id=None):
+        try:
+            room = ChatRoom.objects.prefetch_related('participants').get(id=room_id)
+
+            if not room.participants.filter(id=request.user.id).exists():
+                return Response(
+                    {'error': 'You are not a member of this room'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+
+            participants = [
+                {
+                    'id': user.id,
+                    'username': user.username,
+                    'first_name': user.first_name,
+                    'last_name': user.last_name,
+                    'email': user.email,
+                    'is_online': getattr(user, 'is_online', False),
+                    'last_seen': user.last_seen.isoformat() if user.last_seen else None,
+                }
+                for user in room.participants.all()
+            ]
+
+            return Response(
+                {
+                    'room_id': room.id,
+                    'room_name': room.name,
+                    'room_type': room.room_type,
+                    'creator_id': room.creator.id,
+                    'creator_username': room.creator.username,
+                    'participants_count': room.participants.count(),
+                    'participants': participants,
+                },
+                status=status.HTTP_200_OK
+            )
+        except ChatRoom.DoesNotExist:
+            return Response(
+                {'error': 'Room not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
 
     def post(self, request, room_id):
         """
@@ -696,6 +772,12 @@ class RoomMembersView(APIView):
         """
         try:
             room = ChatRoom.objects.get(id=room_id)
+
+            if room.room_type != 'GROUP':
+                return Response(
+                    {'error': 'Members can only be added to group chats'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
             
             # Check if user is part of the room
             if not room.participants.filter(id=request.user.id).exists():
@@ -732,8 +814,22 @@ class RoomMembersView(APIView):
                     {'error': 'User is already a member of this room'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
+
+            friendship_exists = Friendship.objects.filter(
+                status='ACCEPTED'
+            ).filter(
+                models.Q(from_user=request.user, to_user=user_to_add) |
+                models.Q(from_user=user_to_add, to_user=request.user)
+            ).exists()
+
+            if not friendship_exists:
+                return Response(
+                    {'error': 'You can only add users who are already your friends'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
             
             room.participants.add(user_to_add)
+            room.save() # Update updated_at timestamp
             
             return Response(
                 {
@@ -806,134 +902,6 @@ class RoomMembersView(APIView):
 
 
 
-class UserViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet for user management.
-    """
-    queryset = User.objects.all()
-    serializer_class = UserSerializer
-    permission_classes = [IsAuthenticated]
-
-    @action(detail=False, methods=['get'])
-    def me(self, request):
-        """
-        Get current user profile.
-        """
-        serializer = UserSerializer(request.user)
-        return Response(serializer.data)
-
-    @action(detail=False, methods=['put', 'patch'])
-    def profile_update(self, request):
-        """
-        Update current user profile.
-        """
-        serializer = UserSerializer(request.user, data=request.data, partial=True)
-        if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-    @action(detail=False, methods=['get'])
-    def list_users(self, request):
-        """
-        List all users (for friend discovery).
-        """
-        users = User.objects.exclude(id=request.user.id)
-        serializer = UserSerializer(users, many=True)
-        return Response(serializer.data)
-
-
-class ChatRoomViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet for chat room management.
-    """
-    queryset = ChatRoom.objects.all()
-    serializer_class = ChatRoomSerializer
-    permission_classes = [IsAuthenticated]
-
-    def get_serializer_class(self):
-        """
-        Return the appropriate serializer based on the action.
-        """
-        if self.action == 'retrieve':
-            return ChatRoomDetailSerializer
-        return ChatRoomSerializer
-
-    def get_queryset(self):
-        """
-        Return chat rooms for the current user.
-        """
-        return ChatRoom.objects.filter(participants=self.request.user)
-
-    def perform_create(self, serializer):
-        """
-        Create a new chat room with the current user as creator.
-        """
-        chat_room = serializer.save(creator=self.request.user)
-        chat_room.participants.add(self.request.user)
-
-    @action(detail=True, methods=['post'])
-    def add_participant(self, request, pk=None):
-        """
-        Add a participant to a chat room.
-        """
-        chat_room = self.get_object()
-        user_id = request.data.get('user_id')
-        
-        try:
-            user = User.objects.get(id=user_id)
-            chat_room.participants.add(user)
-            return Response({'message': 'User added successfully'})
-        except User.DoesNotExist:
-            return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
-
-    @action(detail=True, methods=['post'])
-    def remove_participant(self, request, pk=None):
-        """
-        Remove a participant from a chat room.
-        """
-        chat_room = self.get_object()
-        user_id = request.data.get('user_id')
-        
-        try:
-            user = User.objects.get(id=user_id)
-            chat_room.participants.remove(user)
-            return Response({'message': 'User removed successfully'})
-        except User.DoesNotExist:
-            return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
-
-
-class MessageViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet for message management.
-    """
-    queryset = Message.objects.all()
-    serializer_class = MessageSerializer
-    permission_classes = [IsAuthenticated]
-
-    def get_queryset(self):
-        """
-        Return messages for chat rooms the user participates in.
-        """
-        return Message.objects.filter(room__participants=self.request.user)
-
-    def perform_create(self, serializer):
-        """
-        Create a new message with the current user as sender.
-        """
-        serializer.save(sender=self.request.user)
-
-    @action(detail=True, methods=['put'])
-    def mark_as_read(self, request, pk=None):
-        """
-        Mark a message as read.
-        """
-        message = self.get_object()
-        message.is_read = True
-        message.save()
-        return Response({'message': 'Message marked as read'})
-
-
 # ============================================================================
 # CORE: GET OR CREATE ROOM (1-to-1 Direct Messages)
 # ============================================================================
@@ -955,32 +923,19 @@ class GetOrCreateRoomView(APIView):
     """
     permission_classes = [IsAuthenticated]
 
-    def get(self, request):
-        """
-        Check if a room exists between current user and target user.
-        
-        Query params:
-            - target_user_id: The user ID to get/create room with
-            
-        Returns:
-            {
-                'room_id': 'uuid-string',
-                'created': True/False,
-                'room_name': 'username1 & username2'
-            }
-        """
-        target_user_id = request.query_params.get('target_user_id')
-        
-        if not target_user_id:
-            return Response(
-                {'error': 'target_user_id query parameter is required'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
+    def _get_or_create_room(self, request, target_user_id):
         current_user = request.user
         
         # Prevent user from creating room with themselves
-        if int(target_user_id) == current_user.id:
+        try:
+            target_user_id_int = int(target_user_id)
+        except (ValueError, TypeError):
+            return Response(
+                {'error': 'Invalid target_user_id'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if target_user_id_int == current_user.id:
             return Response(
                 {'error': 'Cannot create room with yourself'},
                 status=status.HTTP_400_BAD_REQUEST
@@ -988,7 +943,7 @@ class GetOrCreateRoomView(APIView):
         
         # Check if target user exists
         try:
-            target_user = User.objects.get(id=target_user_id)
+            target_user = User.objects.get(id=target_user_id_int)
         except User.DoesNotExist:
             return Response(
                 {'error': 'Target user not found'},
@@ -1007,11 +962,17 @@ class GetOrCreateRoomView(APIView):
         if existing_rooms.exists():
             # Room exists: return it (no creation)
             room = existing_rooms.first()
+            
+            # Get recent messages for the room
+            messages = Message.objects.filter(room=room).order_by('-created_at')[:20]
+            serializer = MessageSerializer(list(reversed(messages)), many=True)
+            
             return Response(
                 {
                     'room_id': room.id,
                     'created': False,
                     'room_name': f"{current_user.username} & {target_user.username}",
+                    'messages': serializer.data,
                     'message': 'Room already exists'
                 },
                 status=status.HTTP_200_OK
@@ -1035,26 +996,39 @@ class GetOrCreateRoomView(APIView):
                 'room_id': room.id,
                 'created': True,
                 'room_name': room.name,
+                'messages': [],
                 'message': 'Room created successfully'
             },
             status=status.HTTP_201_CREATED
         )
 
-    def post(self, request):
+    def get(self, request, friend_id=None):
+        """
+        Check if a room exists between current user and target user.
+        """
+        target_user_id = friend_id or request.query_params.get('target_user_id')
+        
+        if not target_user_id:
+            return Response(
+                {'error': 'target_user_id or friend_id is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        return self._get_or_create_room(request, target_user_id)
+
+    def post(self, request, friend_id=None):
         """
         Alternative POST endpoint to get_or_create room.
-        Useful for consistency with RESTful patterns.
-        
-        Body:
-            {
-                'target_user_id': <user_id>
-            }
         """
-        target_user_id = request.data.get('target_user_id')
+        target_user_id = friend_id or request.data.get('target_user_id')
         
-        # Reuse GET logic by creating a query params-like object
-        request.query_params = type('obj', (object,), {'get': lambda self, key: target_user_id})()
-        return self.get(request)
+        if not target_user_id:
+            return Response(
+                {'error': 'target_user_id or friend_id is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            
+        return self._get_or_create_room(request, target_user_id)
 
 
 class FriendshipRequestView(APIView):
@@ -1159,11 +1133,49 @@ class FriendshipAcceptView(APIView):
         friendship.status = 'ACCEPTED'
         friendship.save()
         
+        # --- NEW: Create a room and a 'welcome' message ---
+        import uuid
+        from .models import ChatRoom, Message
+        
+        # 1. Check if a DM room already exists
+        existing_rooms = ChatRoom.objects.filter(
+            room_type='DM',
+            participants=friendship.from_user
+        ).filter(
+            participants=friendship.to_user
+        )
+        
+        if not existing_rooms.exists():
+            # Create new DM room
+            room = ChatRoom.objects.create(
+                id=str(uuid.uuid4()),
+                name=f"{friendship.from_user.username} & {friendship.to_user.username}",
+                room_type='DM',
+                creator=request.user,
+                description=f"Direct message between {friendship.from_user.username} and {friendship.to_user.username}"
+            )
+            room.participants.add(friendship.from_user, friendship.to_user)
+        else:
+            room = existing_rooms.first()
+            
+        # 2. Create the "You are now friends" message
+        # We send it as a system-like message from the person who accepted the request
+        Message.objects.create(
+            id=str(uuid.uuid4()),
+            room=room,
+            sender=friendship.from_user, # Make it look like a message from the requester
+            content=f"You are now friends! Say hi to {request.user.username} 👋",
+            message_type='TEXT',
+            is_read=False
+        )
+        # ---------------------------------------------------
+        
         serializer = FriendshipSerializer(friendship)
         return Response(
             {
-                'message': 'Friend request accepted',
-                'friendship': serializer.data
+                'message': 'Friend request accepted and chat started',
+                'friendship': serializer.data,
+                'room_id': room.id
             },
             status=status.HTTP_200_OK
         )
@@ -1342,152 +1354,6 @@ class OutgoingFriendshipRequestsView(APIView):
         return Response(data, status=status.HTTP_200_OK)
 
 
-class HealthCheckView(APIView):
-    """Health check endpoint for Django service."""
-    permission_classes = [AllowAny]
-
-    def get(self, request):
-        return Response(
-            {
-                'status': 'healthy',
-                'service': 'django',
-                'version': '1.0.0',
-            },
-            status=status.HTTP_200_OK
-        )
-
-
-class RoomInfoView(APIView):
-    """Return room metadata for client diagnostics."""
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request, room_id):
-        try:
-            room = ChatRoom.objects.get(id=room_id)
-        except ChatRoom.DoesNotExist:
-            return Response({'error': 'Room not found'}, status=status.HTTP_404_NOT_FOUND)
-
-        if not room.participants.filter(id=request.user.id).exists():
-            return Response({'error': 'You are not a member of this room'}, status=status.HTTP_403_FORBIDDEN)
-
-        users = [
-            {
-                'user_id': u.id,
-                'username': u.username,
-            }
-            for u in room.participants.all()
-        ]
-
-        return Response(
-            {
-                'room_id': room.id,
-                'active_users': users,
-                'user_count': len(users),
-            },
-            status=status.HTTP_200_OK
-        )
-
-
-class GetOrInitChatView(APIView):
-    """
-    Lazy room creation endpoint - combines friendship check and room creation.
-    
-    Flow:
-    1. Check if friendship is ACCEPTED
-    2. Check if room exists between users
-    3. If not, create room
-    4. Return room_id + chat history
-    
-    POST: {target_user_id}
-    """
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request):
-        target_user_id = request.data.get('target_user_id')
-        
-        if not target_user_id:
-            return Response(
-                {'error': 'target_user_id is required'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        current_user = request.user
-        
-        # Prevent self-messaging
-        if int(target_user_id) == current_user.id:
-            return Response(
-                {'error': 'Cannot chat with yourself'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        # Check if target user exists
-        try:
-            target_user = User.objects.get(id=target_user_id)
-        except User.DoesNotExist:
-            return Response(
-                {'error': 'Target user not found'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        
-        # ✓ STEP 1: Check friendship status
-        friendship = Friendship.objects.filter(
-            (models.Q(from_user=current_user, to_user=target_user) |
-             models.Q(from_user=target_user, to_user=current_user))
-        ).first()
-        
-        if not friendship or friendship.status != 'ACCEPTED':
-            return Response(
-                {
-                    'error': 'You are not friends yet',
-                    'friendship_status': friendship.status if friendship else 'NO_REQUEST'
-                },
-                status=status.HTTP_403_FORBIDDEN
-            )
-        
-        # ✓ STEP 2: Check if room exists
-        existing_rooms = ChatRoom.objects.filter(
-            room_type='DM',
-            participants=current_user
-        ).filter(
-            participants=target_user
-        )
-        
-        if existing_rooms.exists():
-            room = existing_rooms.first()
-            messages = Message.objects.filter(room=room).order_by('-created_at')[:50]
-            return Response(
-                {
-                    'room_id': room.id,
-                    'created': False,
-                    'room_name': room.name,
-                    'messages': MessageSerializer(messages, many=True).data,
-                    'message': 'Room already exists'
-                },
-                status=status.HTTP_200_OK
-            )
-        
-        # ✓ STEP 3: Create room (lazy creation)
-        import uuid
-        room = ChatRoom.objects.create(
-            id=str(uuid.uuid4()),
-            name=f"{current_user.username} & {target_user.username}",
-            room_type='DM',
-            creator=current_user,
-            description=f"Direct message between {current_user.username} and {target_user.username}"
-        )
-        
-        room.participants.add(current_user, target_user)
-        
-        return Response(
-            {
-                'room_id': room.id,
-                'created': True,
-                'room_name': room.name,
-                'messages': [],
-                'message': 'Room created successfully (lazy creation)'
-            },
-            status=status.HTTP_201_CREATED
-        )
 
 
 class FriendshipDeleteView(APIView):
@@ -1587,3 +1453,74 @@ class PublicKeyRetrieveView(APIView):
                 {'error': 'Public key not found for this user'},
                 status=status.HTTP_404_NOT_FOUND
             )
+
+
+class DeviceRegisterView(APIView):
+    """
+    Register or update a device FCM token for the authenticated user.
+    POST: {registration_id, type}
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        registration_id = request.data.get('registration_id')
+        device_type = (request.data.get('type') or 'android').lower()
+
+        if not registration_id:
+            return Response(
+                {'error': 'registration_id is required'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if device_type not in {'android', 'ios', 'web'}:
+            return Response(
+                {'error': 'type must be one of: android, ios, web'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        device, created = FCMDevice.objects.update_or_create(
+            registration_id=registration_id,
+            defaults={
+                'user': request.user,
+                'type': device_type,
+                'active': True,
+            },
+        )
+
+        return Response(
+            {
+                'status': 'Device registered',
+                'created': created,
+                'device_id': device.id,
+            },
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
+
+
+class DeviceUnregisterView(APIView):
+    """
+    Deactivate a device token for the authenticated user.
+    POST: {registration_id}
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        registration_id = request.data.get('registration_id')
+        if not registration_id:
+            return Response(
+                {'error': 'registration_id is required'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        updated = FCMDevice.objects.filter(
+            registration_id=registration_id,
+            user=request.user,
+        ).update(active=False)
+
+        return Response(
+            {
+                'status': 'Device unregistered',
+                'updated': updated,
+            },
+            status=status.HTTP_200_OK,
+        )
