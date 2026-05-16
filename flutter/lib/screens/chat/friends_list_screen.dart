@@ -1,12 +1,12 @@
-/// Friends List Screen
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../services/api_service.dart';
-import '../providers/friend_provider.dart';
-import '../services/chat_controller.dart';
+import 'package:go_router/go_router.dart';
+import '../../services/api_service.dart';
+import '../../providers/friend_provider.dart';
+import '../../services/realtime/chat_controller.dart';
 import 'chat_screen.dart';
-import '../providers/chat_provider.dart';
-import '../utils/snackbar_utils.dart';
+import '../../providers/chat_provider.dart';
+import '../../utils/snackbar_utils.dart';
 
 class FriendsListScreen extends StatefulWidget {
   @override
@@ -25,7 +25,7 @@ class _FriendsListScreenState extends State<FriendsListScreen>
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
-    _apiService = ApiService();
+    _apiService = context.read<ApiService>();
     _chatController = ChatController(apiService: _apiService);
     _loadInitialData();
   }
@@ -38,20 +38,22 @@ class _FriendsListScreenState extends State<FriendsListScreen>
   }
 
   Future<void> _loadInitialData() async {
-    try {
-      final user = await _apiService.getCurrentUser();
-      setState(() => _currentUserId = user.id);
+    final userResult = await _apiService.getCurrentUser().run();
+    
+    userResult.fold(
+      (failure) => print('Error loading initial data: ${failure.message}'),
+      (user) async {
+        if (mounted) {
+          setState(() => _currentUserId = user.id);
 
-      // Load all friend data
-      if (mounted) {
-        final friendProvider =
-            Provider.of<FriendProvider>(context, listen: false);
-        await friendProvider.loadAllFriendsData();
-        await friendProvider.loadSuggestedUsers();
-      }
-    } catch (e) {
-      print('Error loading initial data: $e');
-    }
+          // Load all friend data
+          final friendProvider =
+              Provider.of<FriendProvider>(context, listen: false);
+          await friendProvider.loadAllFriendsData();
+          await friendProvider.loadSuggestedUsers();
+        }
+      },
+    );
   }
 
   Future<void> _refreshNewFriends() async {
@@ -98,21 +100,14 @@ class _FriendsListScreenState extends State<FriendsListScreen>
 
       final chatProvider = Provider.of<ChatProvider>(context, listen: false);
 
-      Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (context) => ChangeNotifierProvider.value(
-            value: chatProvider,
-            child: ChatScreen(
-              roomId: response.roomId,
-              roomName: response.roomName,
-              userId: _currentUserId!,
-              username: friendUsername,
-              friendId: friendId,
-              isGroup: false,
-            ),
-          ),
-        ),
-      );
+      context.push('/chat', extra: {
+        'roomId': response.roomId,
+        'roomName': response.roomName,
+        'userId': _currentUserId!,
+        'username': friendUsername,
+        'friendId': friendId,
+        'isGroup': false,
+      });
     } catch (e) {
       SnackbarUtils.showError(context, 'Error starting chat: $e');
     }

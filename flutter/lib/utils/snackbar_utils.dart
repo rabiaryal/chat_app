@@ -1,19 +1,22 @@
 import 'package:flutter/material.dart';
+import '../main.dart';
 
 enum SnackbarType { success, error, info, warning }
 
 class SnackbarUtils {
   static void show(
-    BuildContext context, 
+    BuildContext context,
     String message, {
     SnackbarType type = SnackbarType.info,
     Duration duration = const Duration(seconds: 3),
   }) {
     final colorScheme = _getColors(type);
-    
-    ScaffoldMessenger.of(context).hideCurrentSnackBar();
-    
-    ScaffoldMessenger.of(context).showSnackBar(
+
+    final messenger = MyApp.messengerKey.currentState;
+    if (messenger == null) return;
+
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(
       SnackBar(
         content: Row(
           children: [
@@ -79,8 +82,8 @@ class SnackbarUtils {
       case SnackbarType.warning:
         return _SnackbarColors(backgroundColor: const Color(0xFFF39C12));
       case SnackbarType.info:
-      default:
-        return _SnackbarColors(backgroundColor: const Color(0xFF6C5CE7)); // Brand Purple
+        return _SnackbarColors(
+            backgroundColor: const Color(0xFF6C5CE7)); // Brand Purple
     }
   }
 
@@ -93,7 +96,6 @@ class SnackbarUtils {
       case SnackbarType.warning:
         return Icons.warning_amber_outlined;
       case SnackbarType.info:
-      default:
         return Icons.info_outline;
     }
   }

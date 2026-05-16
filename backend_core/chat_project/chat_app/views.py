@@ -11,6 +11,8 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from drf_spectacular.utils import extend_schema
 from django.contrib.auth import get_user_model
 from django.db import models
+from django.db.models import Q
+import uuid
 from fcm_django.models import FCMDevice
 from .models import ChatRoom, Message, Friendship, UserPublicKey
 from .serializers import (
@@ -85,7 +87,7 @@ class LoginView(APIView):
         description='Login with username and password to get tokens'
     )
     def post(self, request):
-        username = request.data.get('username')
+        username = (request.data.get('username') or '').strip()
         password = request.data.get('password')
         
         if not username or not password:
@@ -95,7 +97,7 @@ class LoginView(APIView):
             )
         
         try:
-            user = User.objects.get(username=username)
+            user = User.objects.get(username__iexact=username)
         except User.DoesNotExist:
             return Response(
                 {'error': 'Invalid credentials'},
@@ -744,6 +746,8 @@ class RoomMembersView(APIView):
                     'email': user.email,
                     'is_online': getattr(user, 'is_online', False),
                     'last_seen': user.last_seen.isoformat() if user.last_seen else None,
+                    'avatar': request.build_absolute_uri(user.avatar.url) if hasattr(user, 'avatar') and user.avatar else None,
+                    'is_creator': user.id == room.creator.id,  # Mark creator
                 }
                 for user in room.participants.all()
             ]
@@ -755,6 +759,8 @@ class RoomMembersView(APIView):
                     'room_type': room.room_type,
                     'creator_id': room.creator.id,
                     'creator_username': room.creator.username,
+                    'creator_first_name': room.creator.first_name,
+                    'creator_last_name': room.creator.last_name,
                     'participants_count': room.participants.count(),
                     'participants': participants,
                 },
@@ -769,6 +775,7 @@ class RoomMembersView(APIView):
     def post(self, request, room_id):
         """
         Add a member to the room.
+        Any group member can add friends, but must validate they are friends.
         """
         try:
             room = ChatRoom.objects.get(id=room_id)
@@ -779,17 +786,10 @@ class RoomMembersView(APIView):
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
-            # Check if user is part of the room
+            # Check if requester is part of the room
             if not room.participants.filter(id=request.user.id).exists():
                 return Response(
                     {'error': 'You are not a member of this room'},
-                    status=status.HTTP_403_FORBIDDEN
-                )
-            
-            # For group chats, need to be creator or have permission
-            if room.room_type == 'GROUP' and room.creator.id != request.user.id:
-                return Response(
-                    {'error': 'Only group creator can add members'},
                     status=status.HTTP_403_FORBIDDEN
                 )
             
@@ -814,19 +814,61 @@ class RoomMembersView(APIView):
                     {'error': 'User is already a member of this room'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
-
+            
+            # Validate that the user to add is a friend of the requester
+            # Friendship model uses from_user / to_user and Status choices
             friendship_exists = Friendship.objects.filter(
-                status='ACCEPTED'
-            ).filter(
-                models.Q(from_user=request.user, to_user=user_to_add) |
-                models.Q(from_user=user_to_add, to_user=request.user)
+                (
+                    Q(from_user=request.user, to_user=user_to_add) |
+                    Q(from_user=user_to_add, to_user=request.user)
+                ),
+                status=Friendship.Status.ACCEPTED
             ).exists()
 
             if not friendship_exists:
                 return Response(
-                    {'error': 'You can only add users who are already your friends'},
+                    {'error': 'You can only add friends to this group'},
                     status=status.HTTP_403_FORBIDDEN
                 )
+
+            # Add the user to the room
+            room.participants.add(user_to_add)
+            room.save()
+
+            # Create a persistent message from the person who added them
+            try:
+                actor_name = request.user.get_full_name() or request.user.username
+                target_name = user_to_add.get_full_name() or user_to_add.username
+                system_content = f"{actor_name} added {target_name} to the group."
+                Message.objects.create(
+                    id=str(uuid.uuid4()),
+                    room=room,
+                    sender=request.user,
+                    content=system_content,
+                    message_type=Message.MessageType.TEXT,
+                )
+            except Exception:
+                # Do not fail the endpoint if message creation fails; still return success
+                pass
+
+            return Response(
+                {
+                    'message': f'User "{user_to_add.username}" added to room',
+                    'user': {
+                        'id': user_to_add.id,
+                        'username': user_to_add.username,
+                        'first_name': user_to_add.first_name,
+                        'last_name': user_to_add.last_name,
+                        'is_creator': False,
+                    }
+                },
+                status=status.HTTP_201_CREATED
+            )
+        except ChatRoom.DoesNotExist:
+            return Response(
+                {'error': 'Room not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
             
             room.participants.add(user_to_add)
             room.save() # Update updated_at timestamp
@@ -882,15 +924,53 @@ class RoomMembersView(APIView):
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
+            # Remove the user from participants
+            before_count = room.participants.count()
             room.participants.remove(user_to_remove)
-            
+            after_count = room.participants.count()
+
+            print(f'✓ Removed user {user_to_remove.username} (id={user_to_remove.id}) from room {room.id}. participants: {before_count} -> {after_count}')
+
+            # Create a persistent message from the person who removed them
+            try:
+                actor_name = request.user.get_full_name() or request.user.username
+                target_name = user_to_remove.get_full_name() or user_to_remove.username
+                if user_id:
+                    system_content = f"{actor_name} removed {target_name} from the group."
+                else:
+                    system_content = f"{actor_name} left the group."
+                Message.objects.create(
+                    id=str(uuid.uuid4()),
+                    room=room,
+                    sender=request.user,
+                    content=system_content,
+                    message_type=Message.MessageType.TEXT,
+                )
+            except Exception as msg_err:
+                print(f'⚠ Failed to create removal system message: {msg_err}')
+
+            # Return updated participants so client can refresh UI easily
+            participants = [
+                {
+                    'id': user.id,
+                    'username': user.username,
+                    'first_name': user.first_name,
+                    'last_name': user.last_name,
+                    'avatar': request.build_absolute_uri(user.avatar.url) if hasattr(user, 'avatar') and user.avatar else None,
+                    'is_creator': user.id == room.creator.id,
+                }
+                for user in room.participants.all()
+            ]
+
             return Response(
                 {
                     'message': f'User "{user_to_remove.username}" removed from room',
                     'user': {
                         'id': user_to_remove.id,
                         'username': user_to_remove.username,
-                    }
+                    },
+                    'participants': participants,
+                    'participants_count': after_count,
                 },
                 status=status.HTTP_200_OK
             )

@@ -44,7 +44,7 @@ class WebSocketService {
   late StreamController<Message> _messageController;
   late String _roomId;
 
-  WebSocketService({this.baseUrl = 'ws://localhost:8000'}) {
+  WebSocketService({this.baseUrl = 'wss://chat.rabiaryal.com.np'}) {
     _messageController = StreamController<Message>.broadcast();
     _channel = null;
   }

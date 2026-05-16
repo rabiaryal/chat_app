@@ -1,18 +1,19 @@
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_screenutil/flutter_screenutil.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 import 'package:provider/provider.dart';
 import 'services/api_service.dart';
-import 'services/chat_service.dart';
-import 'services/hive_token_storage.dart';
+import 'services/realtime/chat_service.dart';
+import 'services/realtime/socket_service.dart';
+import 'services/storage/hive_token_storage.dart';
 import 'services/notification_service.dart';
 import 'providers/auth_provider.dart';
 import 'providers/room_provider.dart';
 import 'providers/chat_provider.dart';
 import 'providers/friend_provider.dart';
-import 'screens/auth_screen.dart';
-import 'screens/chat_list_screen.dart';
-import 'screens/first_time_splash.dart';
-import 'screens/suggested_friends_screen.dart';
+
+import 'constants/router.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -27,13 +28,21 @@ void main() async {
         'Note: You need to add google-services.json (Android) or GoogleService-Info.plist (iOS) to your project.');
   }
 
-  // Initialize Hive for token storage
+  // Initialize Hive and open the shared local boxes used by auth/chat.
+  await Hive.initFlutter();
+  await Future.wait([
+    Hive.openBox<String>('settings'),
+    Hive.openBox<Map>('chat_box'),
+  ]);
+
   final tokenStorage = HiveTokenStorage();
   await tokenStorage.initialize();
   runApp(MyApp(tokenStorage: tokenStorage));
 }
 
 class MyApp extends StatefulWidget {
+  static final GlobalKey<ScaffoldMessengerState> messengerKey =
+      GlobalKey<ScaffoldMessengerState>();
   final HiveTokenStorage tokenStorage;
 
   const MyApp({
@@ -47,6 +56,7 @@ class MyApp extends StatefulWidget {
 
 class _MyAppState extends State<MyApp> {
   late final ApiService _apiService;
+  late final AuthProvider _authProvider;
   late final ChatService _chatService;
   late final NotificationService _notificationService;
 
@@ -54,10 +64,19 @@ class _MyAppState extends State<MyApp> {
   void initState() {
     super.initState();
     _apiService = ApiService(tokenStorage: widget.tokenStorage);
-    _chatService = ChatService(apiService: _apiService);
     _notificationService = NotificationService(apiService: _apiService);
+    _authProvider = AuthProvider(
+      apiService: _apiService,
+      notificationService: _notificationService,
+    );
+    _chatService = ChatService(apiService: _apiService);
+    _apiService.setSessionExpiredCallback(_authProvider.handleSessionExpired);
+    SocketService(apiService: _apiService).setUnauthorizedHandler(
+      _authProvider.handleSessionExpired,
+    );
 
     _initializeNotifications();
+    Future.microtask(_authProvider.initialize);
   }
 
   Future<void> _initializeNotifications() async {
@@ -85,14 +104,7 @@ class _MyAppState extends State<MyApp> {
         ),
         // Auth Provider for authentication state management
         ChangeNotifierProvider(
-          create: (_) {
-            final authProvider = AuthProvider(
-              apiService: _apiService,
-              notificationService: _notificationService,
-            );
-            Future.microtask(authProvider.initialize);
-            return authProvider;
-          },
+          create: (_) => _authProvider,
         ),
         // Room Provider for room management
         ChangeNotifierProvider(
@@ -114,9 +126,12 @@ class _MyAppState extends State<MyApp> {
           create: (_) => FriendProvider(apiService: _apiService),
         ),
       ],
-      child: Consumer<AuthProvider>(
-        builder: (context, authProvider, _) {
-          return MaterialApp(
+      child: ScreenUtilInit(
+        designSize: const Size(375, 812),
+        minTextAdapt: true,
+        splitScreenMode: true,
+        builder: (context, child) {
+          return MaterialApp.router(
             title: 'Chat App',
             debugShowCheckedModeBanner: false,
             theme: ThemeData(
@@ -138,56 +153,10 @@ class _MyAppState extends State<MyApp> {
               useMaterial3: true,
             ),
             themeMode: ThemeMode.light,
-            home: authProvider.isLoading
-                ? const SplashScreen()
-                : (authProvider.isAuthenticated
-                    ? ChatListScreen()
-                    : const FirstTimeSplashScreen()),
-            routes: {
-              '/auth': (context) => AuthScreen(),
-              '/first-time': (context) => const FirstTimeSplashScreen(),
-              '/chat-list': (context) => ChatListScreen(),
-              '/suggested-friends': (context) => const SuggestedFriendsScreen(),
-            },
+            routerConfig: AppRouter.createRouter(_authProvider),
+            scaffoldMessengerKey: MyApp.messengerKey,
           );
         },
-      ),
-    );
-  }
-}
-
-class SplashScreen extends StatelessWidget {
-  const SplashScreen({Key? key}) : super(key: key);
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            ClipOval(
-              child: Image.asset(
-                'assets/images/logo.png',
-                width: 96,
-                height: 96,
-                fit: BoxFit.cover,
-                errorBuilder: (context, error, stackTrace) => Icon(
-                  Icons.chat_bubble_outline,
-                  size: 80,
-                  color: Theme.of(context).primaryColor,
-                ),
-              ),
-            ),
-            SizedBox(height: 24),
-            Text(
-              'Chat App',
-              style: Theme.of(context).textTheme.headlineLarge,
-            ),
-            SizedBox(height: 24),
-            CircularProgressIndicator(),
-          ],
-        ),
       ),
     );
   }

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../providers/friend_provider.dart';
 import '../../providers/room_provider.dart';
-import '../../screens/create_group_screen.dart';
+import '../../screens/chat/create_group_screen.dart';
 
 class UserStatusBar extends StatelessWidget {
   final Color primaryColor;

@@ -142,6 +142,7 @@ class LoginSerializer(serializers.Serializer):
     """
     username = serializers.CharField(required=True, help_text='Username')
     password = serializers.CharField(required=True, write_only=True, help_text='Password')
+    
 
 
 class LogoutSerializer(serializers.Serializer):

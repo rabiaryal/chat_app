@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:go_router/go_router.dart';
 import '../../models/chat_room.dart';
 import '../../providers/chat_provider.dart';
 import '../../providers/room_provider.dart';
-import '../../screens/chat_screen.dart';
+import '../../screens/chat/chat_screen.dart';
 
 class ChatCard extends StatelessWidget {
   final ChatRoom room;
@@ -47,25 +48,14 @@ class ChatCard extends StatelessWidget {
         ),
         child: ListTile(
           onTap: () {
-            final chatProvider =
-                Provider.of<ChatProvider>(context, listen: false);
-
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => ChangeNotifierProvider.value(
-                  value: chatProvider,
-                  child: ChatScreen(
-                    roomId: room.id,
-                    roomName: displayName,
-                    userId: currentUserId ?? 0,
-                    username: currentUsername,
-                    friendId: isGroup ? 0 : (room.otherParticipantId ?? 0),
-                    isGroup: isGroup,
-                  ),
-                ),
-              ),
-            );
+            context.push('/chat', extra: {
+              'roomId': room.id,
+              'roomName': displayName,
+              'userId': currentUserId ?? 0,
+              'username': currentUsername,
+              'friendId': isGroup ? 0 : (room.otherParticipantId ?? 0),
+              'isGroup': isGroup,
+            });
           },
           contentPadding: const EdgeInsets.all(12),
           leading: Container(

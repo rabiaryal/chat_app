@@ -20,7 +20,7 @@ SECRET_KEY = config('SECRET_KEY', default='django-insecure-change-me-in-producti
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = config('DEBUG', default=True, cast=bool)
 
-ALLOWED_HOSTS = ['*']
+ALLOWED_HOSTS = ['chat.rabiaryal.com.np', 'localhost', '127.0.0.1']
 
 # Application definition
 INSTALLED_APPS = [
@@ -122,6 +122,12 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.IsAuthenticatedOrReadOnly',
     ),
+    'DEFAULT_THROTTLE_CLASSES': (
+        'rest_framework.throttling.UserRateThrottle',
+    ),
+    'DEFAULT_THROTTLE_RATES': {
+        'user': '100/minute',
+    },
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 10,
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
@@ -178,17 +184,9 @@ SIMPLE_JWT = {
 }
 
 # CORS Configuration
-# Allow origins from Flutter app, local development, and inter-service communication
+# Restrict CORS to production host by default; can be extended via env var
 CORS_ALLOWED_ORIGINS = [
-    'http://localhost:3000',      # Local development web
-    'http://localhost:8000',      # Django dev server
-    'http://localhost:8080',      # Mobile emulator
-    'http://127.0.0.1:3000',
-    'http://127.0.0.1:8000',
-    'http://127.0.0.1:8080',
-    'http://192.168.1.65:8000',   # Your machine IP - Django
-    'http://192.168.1.65:3000',   # Your machine IP - Web
-    'http://django:8000',         # Docker service name - Inter-service
+    'https://chat.rabiaryal.com.np',
 ]
 
 # Parse from environment if provided

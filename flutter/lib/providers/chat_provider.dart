@@ -3,10 +3,11 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/scheduler.dart';
+
 import '../models/chat_message.dart';
 import '../models/message_model.dart';
-import '../services/chat_persistence_service.dart';
-import '../services/chat_service.dart';
+import '../services/realtime/chat_service.dart';
+import '../services/storage/chat_persistence_service.dart';
 
 class ChatProvider extends ChangeNotifier {
   final ChatService chatService;
@@ -21,7 +22,6 @@ class ChatProvider extends ChangeNotifier {
   String? _currentUsername;
   ChatMessage? _typingIndicator;
 
-  // Getters
   List<ChatMessage> get messages => _messages;
   bool get isLoading => _isLoading;
   bool get isConnected => _isConnected;
@@ -31,19 +31,15 @@ class ChatProvider extends ChangeNotifier {
 
   ChatProvider({required this.chatService})
       : _persistenceService = ChatPersistenceService() {
-    // Listen to WebSocket messages
     chatService.messageStream.listen(
       _onMessageReceived,
       onError: _onError,
     );
 
-    // Listen to connection status
-    chatService.connectionStream.listen(
-      (isConnected) {
-        _isConnected = isConnected;
-        _notifySafely();
-      },
-    );
+    chatService.connectionStream.listen((isConnected) {
+      _isConnected = isConnected;
+      _notifySafely();
+    });
   }
 
   void _notifySafely() {
@@ -57,13 +53,11 @@ class ChatProvider extends ChangeNotifier {
     });
   }
 
-  /// Initialize chat provider with room and user info
   Future<void> initialize({
     required String roomId,
     required int userId,
     required String username,
   }) async {
-    // Prevent redundant initialization for the same room
     if (_currentRoomId == roomId &&
         _currentUserId == userId &&
         _currentUsername == username &&
@@ -73,8 +67,6 @@ class ChatProvider extends ChangeNotifier {
       return;
     }
 
-    // Disconnect when switching rooms or switching accounts.
-    // The websocket and local sender identity must always match the active user.
     if (_currentRoomId != null &&
         (_currentRoomId != roomId ||
             _currentUserId != userId ||
@@ -86,51 +78,102 @@ class ChatProvider extends ChangeNotifier {
     _currentRoomId = roomId;
     _currentUserId = userId;
     _currentUsername = username;
-    _messages = []; // Clear messages from previous room
+    _messages = [];
     _isLoading = true;
     _error = null;
+    _typingIndicator = null;
     _notifySafely();
 
     try {
       await _persistenceService.initialize();
-      final cachedMessages = await _persistenceService.getMessages(
-        roomId,
-        recoveryCallback: () async {
-          final backendMessages = await chatService.apiService.getMessages(
-            roomId,
-            limit: 20,
-          );
-          final recoveredModels =
-              backendMessages.map(MessageModel.fromChatMessage).toList();
-          return recoveredModels;
-        },
-      );
-
+      final cachedMessages = await _persistenceService.getMessages(roomId);
       _messages =
           cachedMessages.map((message) => message.toChatMessage()).toList();
-
       _isConnected = chatService.isConnected;
       _isLoading = false;
       _notifySafely();
-    } catch (e) {
-      print('✗ Chat initialization connection error: $e');
+
+      if (_messages.isEmpty) {
+        unawaited(_refreshMessagesFromApi(roomId));
+      }
+
+      unawaited(_connectInBackground(roomId));
+    } catch (error) {
+      print('✗ Chat initialization connection error: $error');
       _isConnected = false;
       _isLoading = false;
       _notifySafely();
     }
   }
 
-  /// Ensure WebSocket is connected before performing actions
-  Future<void> _ensureConnected() async {
-    if (_currentRoomId != null && !chatService.isConnected) {
-      print('🔌 Lazy connecting to WebSocket for room: $_currentRoomId');
-      await chatService.connectWebSocket(roomId: _currentRoomId!);
-      _isConnected = true;
+  Future<void> _refreshMessagesFromApi(String roomId) async {
+    if (_isLoading) {
+      return;
+    }
+
+    final result = await chatService.apiService
+        .getMessages(
+          roomId,
+          limit: 20,
+        )
+        .run();
+
+    result.fold(
+      (failure) {
+        print('✗ Message recovery failed: ${failure.message}');
+      },
+      (backendMessages) {
+        final models =
+            backendMessages.map(MessageModel.fromChatMessage).toList();
+        unawaited(_persistenceService.replaceMessages(roomId, models));
+      },
+    );
+  }
+
+  Future<void> refreshMessages() async {
+    final roomId = _currentRoomId;
+    if (roomId == null) {
+      return;
+    }
+
+    _isLoading = true;
+    _error = null;
+    _notifySafely();
+
+    try {
+      final result = await chatService.apiService
+          .getMessages(
+            roomId,
+            limit: 20,
+          )
+          .run();
+
+      result.fold(
+        (failure) {
+          _error = failure.message;
+        },
+        (backendMessages) {
+          final models =
+              backendMessages.map(MessageModel.fromChatMessage).toList();
+          _messages = models.map((message) => message.toChatMessage()).toList();
+          unawaited(_persistenceService.replaceMessages(roomId, models));
+          _error = null;
+        },
+      );
+    } finally {
+      _isLoading = false;
       _notifySafely();
     }
   }
 
-  /// 4. Send a text message
+  Future<void> _connectInBackground(String roomId) async {
+    try {
+      await chatService.connectWebSocket(roomId: roomId);
+    } catch (error) {
+      print('⚠ Background socket connect failed: $error');
+    }
+  }
+
   Future<void> sendMessage(String content) async {
     if (content.trim().isEmpty ||
         _currentRoomId == null ||
@@ -138,56 +181,39 @@ class ChatProvider extends ChangeNotifier {
       return;
     }
 
-    // Ensure we are connected before sending
-    await _ensureConnected();
-
-    // Check if message is for bot
     if (content.startsWith('@bot ')) {
-      final botMessage = content.substring(5);
-      _requestBotResponse(botMessage);
-    } else {
-      // Create local message immediately
-      final localMessage = ChatMessage(
-        id: 'local_${DateTime.now().millisecondsSinceEpoch}',
-        content: content,
-        userId: _currentUserId!,
-        username: _currentUsername ?? 'Unknown',
-        roomId: _currentRoomId!,
-        type: MessageType.text,
-        status: MessageStatus.sending,
-        isBot: false,
-        timestamp: DateTime.now(),
-      );
-
-      // Add to UI immediately
-      _messages.add(localMessage);
-      _notifySafely();
-
-      // Save to Hive immediately (with status: sending)
-      unawaited(
-        _persistenceService.addMessage(
-          _currentRoomId!,
-          MessageModel.fromChatMessage(localMessage),
-        ),
-      );
-
-      // Send via WebSocket
-      chatService.sendTextMessage(
-        content: content,
-        roomId: _currentRoomId!,
-        userId: _currentUserId!,
-        username: _currentUsername ?? 'Unknown',
-      );
+      _requestBotResponse(content.substring(5));
+      return;
     }
+
+    final localMessage = ChatMessage(
+      id: 'local_${DateTime.now().millisecondsSinceEpoch}',
+      content: content,
+      userId: _currentUserId!,//reciver userid 
+      username: _currentUsername ?? 'Unknown',
+      roomId: _currentRoomId!,
+      type: MessageType.text,
+      status: MessageStatus.sending,
+      isBot: false,
+      timestamp: DateTime.now(),
+    );
+
+    _messages.add(localMessage);
+    _notifySafely();
+
+    chatService.sendTextMessage(
+      content: content,
+      roomId: _currentRoomId!,
+      userId: _currentUserId!,
+      username: _currentUsername ?? 'Unknown',
+    );
   }
 
-  /// Request bot response
   void _requestBotResponse(String content) {
     if (_currentRoomId == null || _currentUserId == null) {
       return;
     }
 
-    // Add user message immediately
     final userMessage = ChatMessage(
       id: 'local_${DateTime.now().millisecondsSinceEpoch}',
       content: content,
@@ -201,15 +227,6 @@ class ChatProvider extends ChangeNotifier {
     );
     _messages.add(userMessage);
 
-    // Save to Hive immediately
-    unawaited(
-      _persistenceService.addMessage(
-        _currentRoomId!,
-        MessageModel.fromChatMessage(userMessage),
-      ),
-    );
-
-    // Show "Bot is thinking..." indicator
     _typingIndicator = ChatMessage(
       id: 'typing_indicator',
       content: '',
@@ -230,50 +247,35 @@ class ChatProvider extends ChangeNotifier {
     );
   }
 
-  /// Send typing indicator
   void onUserTyping() {
     if (_currentRoomId != null) {
       chatService.sendTypingIndicator(_currentRoomId!);
     }
   }
 
-  /// Handle incoming message
   void _onMessageReceived(ChatMessage message) {
-    // *** FIX BUG 1: Ignore messages that belong to a different room ***
-    // This prevents messages sent in room B from appearing in room A's view.
     if (message.status != MessageStatus.read &&
         message.roomId.isNotEmpty &&
         message.roomId != _currentRoomId) {
       print(
-          '⚠ Ignoring message for room ${message.roomId}, currently in $_currentRoomId');
+        '⚠ Ignoring message for room ${message.roomId}, currently in $_currentRoomId',
+      );
       return;
     }
 
-    // Clear typing indicator if receiving a message
     if (message.isBot && message.status == MessageStatus.streaming) {
       _typingIndicator = null;
     }
 
-    // Check if this is a "read receipt" event for an existing message
     if (message.status == MessageStatus.read) {
       print('📖 Received read receipt for message: ${message.id}');
-      final existingIndex = _messages.indexWhere((m) => m.id == message.id);
+      final existingIndex =
+          _messages.indexWhere((item) => item.id == message.id);
       if (existingIndex != -1) {
         if (_messages[existingIndex].status != MessageStatus.read) {
           _messages[existingIndex] = _messages[existingIndex].copyWith(
             status: MessageStatus.read,
           );
-
-          // Update Hive cache
-          if (_currentRoomId != null) {
-            unawaited(
-              _persistenceService.updateMessageId(
-                _currentRoomId!,
-                message.id,
-                MessageModel.fromChatMessage(_messages[existingIndex]),
-              ),
-            );
-          }
           _notifySafely();
           print('✓ Updated message ${message.id} status to READ');
         }
@@ -284,53 +286,24 @@ class ChatProvider extends ChangeNotifier {
       return;
     }
 
-    // Check if this is a delivery confirmation for a message we sent locally
     if (message.id.startsWith('local_')) {
-      // This is a local message from sendTextMessage, add it
       _messages.add(message);
     } else {
-      // Check if this is a server confirmation of a local message
       final localMessageIndex = _messages.indexWhere(
-        (m) =>
-            m.id.startsWith('local_') &&
-            m.content == message.content &&
-            m.userId == message.userId &&
-            m.roomId == message.roomId,
+        (item) =>
+            item.id.startsWith('local_') &&
+            item.content == message.content &&
+            item.userId == message.userId &&
+            item.roomId == message.roomId,
       );
 
       if (localMessageIndex != -1) {
-        final oldLocalId = _messages[localMessageIndex].id;
-        // Update the local message with server ID and mark as delivered
         _messages[localMessageIndex] = _messages[localMessageIndex].copyWith(
           id: message.id,
           status: MessageStatus.delivered,
         );
-
-        // Update Hive cache: delete old local message, save with new server ID
-        if (_currentRoomId != null) {
-          unawaited(
-            _persistenceService.updateMessageId(
-              _currentRoomId!,
-              oldLocalId,
-              MessageModel.fromChatMessage(_messages[localMessageIndex]),
-            ),
-          );
-        }
-      } else {
-        // This is a message from someone else or a new message
-        if (!_messages.any((m) => m.id == message.id)) {
-          _messages.add(message);
-        }
-
-        // Save new messages to Hive cache
-        if (_currentRoomId != null) {
-          unawaited(
-            _persistenceService.addMessage(
-              _currentRoomId!,
-              MessageModel.fromChatMessage(message),
-            ),
-          );
-        }
+      } else if (!_messages.any((item) => item.id == message.id)) {
+        _messages.add(message);
       }
     }
 
@@ -338,49 +311,33 @@ class ChatProvider extends ChangeNotifier {
     _notifySafely();
   }
 
-  /// Handle errors
   void _onError(dynamic error) {
     _error = error.toString();
     _notifySafely();
   }
 
-  /// Mark message as read
   void markAsRead(String messageId) {
     if (_currentRoomId == null) return;
 
-    final index = _messages.indexWhere((m) => m.id == messageId);
+    final index = _messages.indexWhere((item) => item.id == messageId);
     if (index != -1) {
-      // Only send if it's not already read and it's NOT our own message
       if (_messages[index].status != MessageStatus.read &&
           _messages[index].userId != _currentUserId) {
         _messages[index] = _messages[index].copyWith(
           status: MessageStatus.read,
         );
-
-        // Notify server
         chatService.sendMarkRead(_currentRoomId!, messageId);
-
-        // Update Hive
-        unawaited(
-          _persistenceService.markMessageAsRead(
-            _currentRoomId!,
-            messageId,
-          ),
-        );
-
         _notifySafely();
       }
     }
   }
 
-  /// Clear messages
   void clearMessages() {
     _messages.clear();
     _error = null;
     _notifySafely();
   }
 
-  /// Reconnect WebSocket
   Future<void> reconnect() async {
     if (_currentRoomId != null) {
       try {
@@ -392,15 +349,14 @@ class ChatProvider extends ChangeNotifier {
         _isConnected = true;
         _isLoading = false;
         _notifySafely();
-      } catch (e) {
-        _error = 'Reconnection failed: $e';
+      } catch (error) {
+        _error = 'Reconnection failed: $error';
         _isLoading = false;
         _notifySafely();
       }
     }
   }
 
-  /// Disconnect from current room
   Future<void> disconnect() async {
     _currentRoomId = null;
     _isConnected = false;

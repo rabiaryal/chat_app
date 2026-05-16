@@ -3,7 +3,7 @@ import 'package:flutter/foundation.dart';
 import '../models/friend.dart';
 import '../models/user.dart';
 import '../services/api_service.dart';
-import '../services/friend_persistence_service.dart';
+import '../services/storage/friend_persistence_service.dart';
 
 class FriendProvider extends ChangeNotifier {
   final ApiService apiService;
@@ -49,61 +49,64 @@ class FriendProvider extends ChangeNotifier {
     _error = null;
     notifyListeners();
 
-    try {
-      // On initial load, try to get cached friends first
-      if (refresh && _friends.isEmpty) {
-        final cachedUsers = await _persistenceService.getCachedFriends();
-        if (cachedUsers.isNotEmpty) {
-          _friends = cachedUsers.map((user) => Friend(
-            id: user.id,
-            username: user.username,
-            firstName: user.firstName,
-            lastName: user.lastName,
-            email: user.email,
-            isOnline: user.isOnline,
-            lastSeen: user.lastSeen,
-          )).toList();
-          notifyListeners();
-        }
+    // On initial load, try to get cached friends first
+    if (refresh && _friends.isEmpty) {
+      final cachedUsers = await _persistenceService.getCachedFriends();
+      if (cachedUsers.isNotEmpty) {
+        _friends = cachedUsers.map((user) => Friend(
+          id: user.id,
+          username: user.username,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          email: user.email,
+          isOnline: user.isOnline,
+          lastSeen: user.lastSeen,
+        )).toList();
+        notifyListeners();
       }
-
-      final userList = await apiService.getFriends(page: _currentPage, limit: 10);
-      
-      final mappedFriends = userList.map((user) => Friend(
-            id: user.id,
-            username: user.username,
-            firstName: user.firstName,
-            lastName: user.lastName,
-            email: user.email,
-            isOnline: user.isOnline,
-            lastSeen: user.lastSeen,
-          )).toList();
-
-      if (refresh) {
-        _friends = mappedFriends;
-        await _persistenceService.replaceFriends(userList);
-      } else {
-        _friends.addAll(mappedFriends);
-        await _persistenceService.appendFriends(userList);
-      }
-
-      if (userList.length < 10) {
-        _hasMoreFriends = false;
-      } else {
-        _currentPage++;
-      }
-
-      _isLoading = false;
-      _isLoadingMore = false;
-      notifyListeners();
-      print('✓ Loaded ${_friends.length} friends (Page $_currentPage)');
-    } catch (e) {
-      _error = e.toString();
-      _isLoading = false;
-      _isLoadingMore = false;
-      notifyListeners();
-      print('✗ Failed to load friends: $e');
     }
+
+    final result = await apiService.getFriends(page: _currentPage, limit: 10).run();
+    
+    result.fold(
+      (failure) {
+        _error = failure.message;
+        _isLoading = false;
+        _isLoadingMore = false;
+        notifyListeners();
+        print('✗ Failed to load friends: ${failure.message}');
+      },
+      (userList) async {
+        final mappedFriends = userList.map((user) => Friend(
+              id: user.id,
+              username: user.username,
+              firstName: user.firstName,
+              lastName: user.lastName,
+              email: user.email,
+              isOnline: user.isOnline,
+              lastSeen: user.lastSeen,
+            )).toList();
+
+        if (refresh) {
+          _friends = mappedFriends;
+          await _persistenceService.replaceFriends(userList);
+        } else {
+          _friends.addAll(mappedFriends);
+          await _persistenceService.appendFriends(userList);
+        }
+
+        if (userList.length < 10) {
+          _hasMoreFriends = false;
+        } else {
+          _currentPage++;
+        }
+
+        _isLoading = false;
+        _isLoadingMore = false;
+        notifyListeners();
+        print('✓ Loaded ${_friends.length} friends (Page $_currentPage)');
+      },
+    );
   }
 
   /// Load incoming friend requests
@@ -112,18 +115,22 @@ class FriendProvider extends ChangeNotifier {
     _error = null;
     notifyListeners();
 
-    try {
-      final requests = await apiService.getIncomingFriendRequests();
-      _incomingRequests = requests;
-      _isLoading = false;
-      notifyListeners();
-      print('✓ Loaded ${_incomingRequests.length} incoming requests');
-    } catch (e) {
-      _error = e.toString();
-      _isLoading = false;
-      notifyListeners();
-      print('✗ Failed to load incoming requests: $e');
-    }
+    final result = await apiService.getIncomingFriendRequests().run();
+
+    result.fold(
+      (failure) {
+        _error = failure.message;
+        _isLoading = false;
+        notifyListeners();
+        print('✗ Failed to load incoming requests: ${failure.message}');
+      },
+      (requests) {
+        _incomingRequests = requests;
+        _isLoading = false;
+        notifyListeners();
+        print('✓ Loaded ${_incomingRequests.length} incoming requests');
+      },
+    );
   }
 
   /// Load outgoing friend requests
@@ -134,18 +141,22 @@ class FriendProvider extends ChangeNotifier {
     }
     _error = null;
 
-    try {
-      final requests = await apiService.getOutgoingFriendRequests();
-      _outgoingRequests = requests;
-      if (showLoading) _isLoading = false;
-      notifyListeners();
-      print('✓ Loaded ${_outgoingRequests.length} outgoing requests');
-    } catch (e) {
-      _error = e.toString();
-      if (showLoading) _isLoading = false;
-      notifyListeners();
-      print('✗ Failed to load outgoing requests: $e');
-    }
+    final result = await apiService.getOutgoingFriendRequests().run();
+
+    result.fold(
+      (failure) {
+        _error = failure.message;
+        if (showLoading) _isLoading = false;
+        notifyListeners();
+        print('✗ Failed to load outgoing requests: ${failure.message}');
+      },
+      (requests) {
+        _outgoingRequests = requests;
+        if (showLoading) _isLoading = false;
+        notifyListeners();
+        print('✓ Loaded ${_outgoingRequests.length} outgoing requests');
+      },
+    );
   }
 
   /// Load all friend data (friends and requests)
@@ -154,20 +165,12 @@ class FriendProvider extends ChangeNotifier {
     _error = null;
     notifyListeners();
 
-    try {
-      await Future.wait([
-        loadFriends(refresh: true),
-        loadIncomingRequests(),
-        loadOutgoingRequests(),
-      ]);
-      _isLoading = false;
-      notifyListeners();
-    } catch (e) {
-      _error = e.toString();
-      _isLoading = false;
-      notifyListeners();
-      print('✗ Failed to load friend data: $e');
-    }
+    await loadFriends(refresh: true);
+    await loadIncomingRequests();
+    await loadOutgoingRequests();
+    
+    _isLoading = false;
+    notifyListeners();
   }
 
   /// Send a friend request
@@ -175,24 +178,28 @@ class FriendProvider extends ChangeNotifier {
     _error = null;
     notifyListeners();
 
-    try {
-      await apiService.sendFriendRequest(targetUserId: targetUserId);
-      // Reload outgoing requests quietly
-      await loadOutgoingRequests(showLoading: false);
-      
-      // Remove the successfully requested user from available suggestions/searches
-      _suggestedUsers.removeWhere((user) => user.id == targetUserId);
-      _searchResults.removeWhere((user) => user.id == targetUserId);
-      
-      notifyListeners();
-      print('✓ Friend request sent');
-      return true;
-    } catch (e) {
-      _error = e.toString();
-      notifyListeners();
-      print('✗ Failed to send friend request: $e');
-      return false;
-    }
+    final result = await apiService.sendFriendRequest(targetUserId: targetUserId).run();
+    
+    return result.fold(
+      (failure) {
+        _error = failure.message;
+        notifyListeners();
+        print('✗ Failed to send friend request: ${failure.message}');
+        return false;
+      },
+      (_) async {
+        // Reload outgoing requests quietly
+        await loadOutgoingRequests(showLoading: false);
+        
+        // Remove the successfully requested user from available suggestions/searches
+        _suggestedUsers.removeWhere((user) => user.id == targetUserId);
+        _searchResults.removeWhere((user) => user.id == targetUserId);
+        
+        notifyListeners();
+        print('✓ Friend request sent');
+        return true;
+      },
+    );
   }
 
   /// Accept a friend request
@@ -201,21 +208,25 @@ class FriendProvider extends ChangeNotifier {
     _error = null;
     notifyListeners();
 
-    try {
-      await apiService.acceptFriendRequest(requestId);
-      // Reload data
-      await loadAllFriendsData();
-      _isLoading = false;
-      notifyListeners();
-      print('✓ Friend request accepted');
-      return true;
-    } catch (e) {
-      _error = e.toString();
-      _isLoading = false;
-      notifyListeners();
-      print('✗ Failed to accept friend request: $e');
-      return false;
-    }
+    final result = await apiService.acceptFriendRequest(requestId).run();
+
+    return result.fold(
+      (failure) {
+        _error = failure.message;
+        _isLoading = false;
+        notifyListeners();
+        print('✗ Failed to accept friend request: ${failure.message}');
+        return false;
+      },
+      (_) async {
+        // Reload data
+        await loadAllFriendsData();
+        _isLoading = false;
+        notifyListeners();
+        print('✓ Friend request accepted');
+        return true;
+      },
+    );
   }
 
   /// Reject a friend request
@@ -224,21 +235,25 @@ class FriendProvider extends ChangeNotifier {
     _error = null;
     notifyListeners();
 
-    try {
-      await apiService.rejectFriendRequest(requestId);
-      // Reload data
-      await loadAllFriendsData();
-      _isLoading = false;
-      notifyListeners();
-      print('✓ Friend request rejected');
-      return true;
-    } catch (e) {
-      _error = e.toString();
-      _isLoading = false;
-      notifyListeners();
-      print('✗ Failed to reject friend request: $e');
-      return false;
-    }
+    final result = await apiService.rejectFriendRequest(requestId).run();
+
+    return result.fold(
+      (failure) {
+        _error = failure.message;
+        _isLoading = false;
+        notifyListeners();
+        print('✗ Failed to reject friend request: ${failure.message}');
+        return false;
+      },
+      (_) async {
+        // Reload data
+        await loadAllFriendsData();
+        _isLoading = false;
+        notifyListeners();
+        print('✓ Friend request rejected');
+        return true;
+      },
+    );
   }
 
   /// Remove a friend
@@ -247,33 +262,37 @@ class FriendProvider extends ChangeNotifier {
     _error = null;
     notifyListeners();
 
-    try {
-      await apiService.removeFriend(friendId);
-      _friends.removeWhere((friend) => friend.id == friendId);
-      
-      // Sync with Hive cache
-      final userList = _friends.map((f) => User(
-        id: f.id,
-        username: f.username,
-        email: f.email,
-        firstName: f.firstName,
-        lastName: f.lastName,
-        isOnline: f.isOnline,
-        lastSeen: f.lastSeen,
-      )).toList();
-      await _persistenceService.replaceFriends(userList);
+    final result = await apiService.removeFriend(friendId).run();
 
-      _isLoading = false;
-      notifyListeners();
-      print('✓ Friend removed');
-      return true;
-    } catch (e) {
-      _error = e.toString();
-      _isLoading = false;
-      notifyListeners();
-      print('✗ Failed to remove friend: $e');
-      return false;
-    }
+    return result.fold(
+      (failure) {
+        _error = failure.message;
+        _isLoading = false;
+        notifyListeners();
+        print('✗ Failed to remove friend: ${failure.message}');
+        return false;
+      },
+      (_) async {
+        _friends.removeWhere((friend) => friend.id == friendId);
+        
+        // Sync with Hive cache
+        final userList = _friends.map((f) => User(
+          id: f.id,
+          username: f.username,
+          email: f.email,
+          firstName: f.firstName,
+          lastName: f.lastName,
+          isOnline: f.isOnline,
+          lastSeen: f.lastSeen,
+        )).toList();
+        await _persistenceService.replaceFriends(userList);
+
+        _isLoading = false;
+        notifyListeners();
+        print('✓ Friend removed');
+        return true;
+      },
+    );
   }
 
   /// Search for users
@@ -283,36 +302,39 @@ class FriendProvider extends ChangeNotifier {
     _error = null;
     notifyListeners();
 
-    try {
-      if (query.isEmpty) {
-        _searchResults = [];
+    if (query.isEmpty) {
+      _searchResults = [];
+      _isLoading = false;
+      notifyListeners();
+      return;
+    }
+
+    final result = await apiService.searchUsers(query).run();
+
+    result.fold(
+      (failure) {
+        _error = failure.message;
         _isLoading = false;
         notifyListeners();
-        return;
-      }
-
-      final results = await apiService.searchUsers(query);
-
-      _searchResults = results
-          .map((user) => Friend(
-                id: user.id,
-                username: user.username,
-                firstName: user.firstName,
-                lastName: user.lastName,
-                email: user.email,
-                isOnline: user.isOnline,
-                lastSeen: user.lastSeen,
-              ))
-          .toList();
-      _isLoading = false;
-      notifyListeners();
-      print('✓ Found ${_searchResults.length} users matching "$query"');
-    } catch (e) {
-      _error = e.toString();
-      _isLoading = false;
-      notifyListeners();
-      print('✗ Failed to search users: $e');
-    }
+        print('✗ Failed to search users: ${failure.message}');
+      },
+      (results) {
+        _searchResults = results
+            .map((user) => Friend(
+                  id: user.id,
+                  username: user.username,
+                  firstName: user.firstName,
+                  lastName: user.lastName,
+                  email: user.email,
+                  isOnline: user.isOnline,
+                  lastSeen: user.lastSeen,
+                ))
+            .toList();
+        _isLoading = false;
+        notifyListeners();
+        print('✓ Found ${_searchResults.length} users matching "$query"');
+      },
+    );
   }
 
   /// Load suggested users (for discovering new friends)
@@ -321,27 +343,40 @@ class FriendProvider extends ChangeNotifier {
     _error = null;
     notifyListeners();
 
+    final result = await apiService.getSuggestedUsers(page: page, limit: limit).run();
+
+    result.fold(
+      (failure) {
+        _error = failure.message;
+        _isLoading = false;
+        notifyListeners();
+        print('✗ Failed to load suggested users: ${failure.message}');
+      },
+      (users) {
+        _suggestedUsers = users
+            .map((user) => Friend(
+                  id: user.id,
+                  username: user.username,
+                  firstName: user.firstName,
+                  lastName: user.lastName,
+                  email: user.email,
+                  isOnline: user.isOnline,
+                  lastSeen: user.lastSeen,
+                ))
+            .toList();
+        _isLoading = false;
+        notifyListeners();
+        print('✓ Loaded ${_suggestedUsers.length} suggested users');
+      },
+    );
+  }
+
+  /// Check if a user is online
+  bool isUserOnline(int userId) {
     try {
-      final users = await apiService.getSuggestedUsers(page: page, limit: limit);
-      _suggestedUsers = users
-          .map((user) => Friend(
-                id: user.id,
-                username: user.username,
-                firstName: user.firstName,
-                lastName: user.lastName,
-                email: user.email,
-                isOnline: user.isOnline,
-                lastSeen: user.lastSeen,
-              ))
-          .toList();
-      _isLoading = false;
-      notifyListeners();
-      print('✓ Loaded ${_suggestedUsers.length} suggested users');
-    } catch (e) {
-      _error = e.toString();
-      _isLoading = false;
-      notifyListeners();
-      print('✗ Failed to load suggested users: $e');
+      return _friends.firstWhere((f) => f.id == userId).isOnline;
+    } catch (_) {
+      return false;
     }
   }
 

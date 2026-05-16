@@ -46,23 +46,19 @@ class EncryptionService {
     return await _storage.read(key: _privateKeyKey);
   }
 
-  /// Encrypt a message using AES, and wrap the AES key using the recipient's RSA Public Key.
+  /// Encrypt a message using AES, wrapped with recipient's RSA Public Key
   Future<Map<String, String>> encryptMessage(
       String plainText, String recipientPublicKeyPem) async {
-    // 1. Generate a random AES key (32 bytes / 256 bits) and IV (16 bytes)
     final aesKey = Key.fromSecureRandom(32);
     final iv = IV.fromSecureRandom(16);
 
-    // 2. Encrypt the plain text with AES-CBC
     final encrypter = Encrypter(AES(aesKey));
     final encryptedPayload = encrypter.encrypt(plainText, iv: iv);
 
-    // 3. Encrypt the AES key with the recipient's RSA Public Key
     final parser = RSAKeyParser();
     final rsaPublicKey = parser.parse(recipientPublicKeyPem) as pc.RSAPublicKey;
     final rsaEncrypter = Encrypter(RSA(publicKey: rsaPublicKey));
 
-    // The AES key as bytes needs to be encrypted
     final encryptedAesKey = rsaEncrypter.encrypt(aesKey.base64);
 
     return {
@@ -72,7 +68,7 @@ class EncryptionService {
     };
   }
 
-  /// Decrypt a message using own RSA Private Key and the provided encrypted AES key/IV.
+  /// Decrypt a message using own RSA Private Key
   Future<String> decryptMessage({
     required String encryptedPayload,
     required String encryptedKey,
@@ -81,7 +77,6 @@ class EncryptionService {
     final privateKeyPem = await getLocalPrivateKey();
     if (privateKeyPem == null) throw Exception("Local private key not found");
 
-    // 1. Decrypt the AES key using own RSA Private Key
     final parser = RSAKeyParser();
     final rsaPrivateKey = parser.parse(privateKeyPem) as pc.RSAPrivateKey;
     final rsaEncrypter = Encrypter(RSA(privateKey: rsaPrivateKey));
@@ -91,21 +86,15 @@ class EncryptionService {
     final aesKey = Key.fromBase64(decryptedAesKeyBase64);
     final iv = IV.fromBase64(ivBase64);
 
-    // 2. Decrypt the payload using the decrypted AES key
     final encrypter = Encrypter(AES(aesKey));
-    final decryptedText =
-        encrypter.decrypt(Encrypted.fromBase64(encryptedPayload), iv: iv);
-
-    return decryptedText;
+    return encrypter.decrypt(Encrypted.fromBase64(encryptedPayload), iv: iv);
   }
-
-  // --- Helper Methods for PEM encoding ---
 
   String _encodePublicKeyToPem(pc.RSAPublicKey key) {
     var topLevel = pc_asn1.ASN1Sequence(elements: []);
     var algorithmIdentifier = pc_asn1.ASN1Sequence(elements: []);
     algorithmIdentifier.add(pc_asn1.ASN1ObjectIdentifier.fromIdentifierString(
-        '1.2.840.113549.1.1.1')); // rsaEncryption
+        '1.2.840.113549.1.1.1'));
     algorithmIdentifier.add(pc_asn1.ASN1Null());
 
     var publicKeySequence = pc_asn1.ASN1Sequence(elements: []);
@@ -123,27 +112,27 @@ class EncryptionService {
 
   String _encodePrivateKeyToPem(pc.RSAPrivateKey key) {
     var topLevel = pc_asn1.ASN1Sequence(elements: []);
-    topLevel.add(pc_asn1.ASN1Integer(BigInt.from(0))); // version
+    topLevel.add(pc_asn1.ASN1Integer(BigInt.from(0)));
 
     var algorithmIdentifier = pc_asn1.ASN1Sequence(elements: []);
     algorithmIdentifier.add(pc_asn1.ASN1ObjectIdentifier.fromIdentifierString(
-        '1.2.840.113549.1.1.1')); // rsaEncryption
+        '1.2.840.113549.1.1.1'));
     algorithmIdentifier.add(pc_asn1.ASN1Null());
     topLevel.add(algorithmIdentifier);
 
     var privateKeySequence = pc_asn1.ASN1Sequence(elements: []);
-    privateKeySequence.add(pc_asn1.ASN1Integer(BigInt.from(0))); // version
+    privateKeySequence.add(pc_asn1.ASN1Integer(BigInt.from(0)));
     privateKeySequence.add(pc_asn1.ASN1Integer(key.n));
     privateKeySequence.add(pc_asn1.ASN1Integer(key.publicExponent));
     privateKeySequence.add(pc_asn1.ASN1Integer(key.privateExponent));
     privateKeySequence.add(pc_asn1.ASN1Integer(key.p));
     privateKeySequence.add(pc_asn1.ASN1Integer(key.q));
     privateKeySequence.add(pc_asn1.ASN1Integer(
-        key.privateExponent! % (key.p! - BigInt.from(1)))); // exp1
+        key.privateExponent! % (key.p! - BigInt.from(1))));
     privateKeySequence.add(pc_asn1.ASN1Integer(
-        key.privateExponent! % (key.q! - BigInt.from(1)))); // exp2
+        key.privateExponent! % (key.q! - BigInt.from(1))));
     privateKeySequence
-        .add(pc_asn1.ASN1Integer(key.q!.modInverse(key.p!))); // coefficient
+        .add(pc_asn1.ASN1Integer(key.q!.modInverse(key.p!)));
 
     var privateKeyOctetString =
         pc_asn1.ASN1OctetString(octets: privateKeySequence.encode());

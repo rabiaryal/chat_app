@@ -5,7 +5,8 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'api_service.dart';
-import 'hive_token_storage.dart';
+import 'storage/hive_token_storage.dart';
+import '../constants/api_constant.dart';
 
 /// ChatRepository: Combines REST API and WebSocket for complete chat functionality
 ///
@@ -60,7 +61,7 @@ class ChatRepository {
 
       final response = await http.get(
         Uri.parse(
-            '${apiService.baseUrl}/api/v1/room/?target_user_id=$targetUserId'),
+            '${apiService.baseUrl}${ApiConstant.getOrCreateRoom(targetUserId)}'),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer ${tokenStorage.getAccessToken()}',

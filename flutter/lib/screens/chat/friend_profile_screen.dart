@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../services/chat_controller.dart';
-import '../services/api_service.dart';
-import '../providers/chat_provider.dart';
+import '../../services/realtime/chat_controller.dart';
+import '../../services/api_service.dart';
+import '../../providers/chat_provider.dart';
 import 'chat_screen.dart';
 
 /// FriendProfile Screen
@@ -44,22 +44,24 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
   @override
   void initState() {
     super.initState();
-    _chatController = ChatController(apiService: ApiService());
+    _chatController = ChatController(apiService: context.read<ApiService>());
     _loadCurrentUserId();
     _checkFriendshipStatus();
   }
 
   Future<void> _loadCurrentUserId() async {
-    try {
-      final user = await ApiService().getCurrentUser();
-      if (mounted) {
-        setState(() {
-          _currentUserId = user.id;
-        });
-      }
-    } catch (e) {
-      print('Error loading current user: $e');
-    }
+    final result = await context.read<ApiService>().getCurrentUser().run();
+    
+    result.fold(
+      (failure) => print('Error loading current user: ${failure.message}'),
+      (user) {
+        if (mounted) {
+          setState(() {
+            _currentUserId = user.id;
+          });
+        }
+      },
+    );
   }
 
   Future<void> _checkFriendshipStatus() async {
@@ -67,9 +69,11 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
       final status = await _chatController.checkFriendshipStatus(
         targetUserId: widget.userId,
       );
-      setState(() {
-        _friendshipStatus = status;
-      });
+      if (mounted) {
+        setState(() {
+          _friendshipStatus = status;
+        });
+      }
     } catch (e) {
       print('Error checking friendship status: $e');
     }

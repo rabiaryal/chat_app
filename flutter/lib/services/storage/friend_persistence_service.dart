@@ -1,9 +1,10 @@
 import 'package:hive_flutter/hive_flutter.dart';
-import '../models/user.dart';
+import '../../models/user.dart';
+import 'hive_token_storage.dart';
 
 /// Hive-backed persistence for the user's friend list.
 class FriendPersistenceService {
-  static const String _boxName = 'cached_friends';
+  static const String _boxPrefix = 'cached_friends';
 
   bool _isInitialized = false;
 
@@ -15,9 +16,14 @@ class FriendPersistenceService {
     _isInitialized = true;
   }
 
-  Future<Box<Map>> _openBox() async {
+  String _boxName([String? userId]) {
+    final scope = userId ?? HiveTokenStorage.instance.getCurrentUserId();
+    return scope == null ? '${_boxPrefix}_global' : '${_boxPrefix}_$scope';
+  }
+
+  Future<Box<Map>> _openBox({String? userId}) async {
     await initialize();
-    return await Hive.openBox<Map>(_boxName);
+    return await Hive.openBox<Map>(_boxName(userId));
   }
 
   /// Replace the currently cached friends with a new list
@@ -25,7 +31,6 @@ class FriendPersistenceService {
     final box = await _openBox();
     await box.clear();
 
-    // Map the user ID to their JSON representation
     final Map<dynamic, Map<String, dynamic>> friendsMap = {};
     for (final friend in friends) {
       friendsMap[friend.id] = friend.toJson();
@@ -46,7 +51,7 @@ class FriendPersistenceService {
   /// Retrieve all cached friends
   Future<List<User>> getCachedFriends() async {
     final box = await _openBox();
-    
+
     final friends = box.values
         .map((value) => User.fromJson(Map<String, dynamic>.from(value)))
         .toList();
@@ -55,10 +60,10 @@ class FriendPersistenceService {
     friends.sort((a, b) {
       if (a.isOnline && !b.isOnline) return -1;
       if (!a.isOnline && b.isOnline) return 1;
-      
+
       final aDate = a.lastSeen ?? DateTime.fromMillisecondsSinceEpoch(0);
       final bDate = b.lastSeen ?? DateTime.fromMillisecondsSinceEpoch(0);
-      return bDate.compareTo(aDate); // Descending
+      return bDate.compareTo(aDate);
     });
 
     return friends;
@@ -67,6 +72,12 @@ class FriendPersistenceService {
   /// Clear all cached friends (e.g., on logout)
   Future<void> clearFriends() async {
     final box = await _openBox();
+    await box.clear();
+  }
+
+  /// Clear only the cache for a specific user id.
+  Future<void> clearFriendsForUser(String userId) async {
+    final box = await _openBox(userId: userId);
     await box.clear();
   }
 }

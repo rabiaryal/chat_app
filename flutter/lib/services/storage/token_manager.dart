@@ -57,7 +57,6 @@ class TokenManager {
       final parts = token.split('.');
       if (parts.length != 3) return null;
 
-      // Decode payload with padding
       String payload = parts[1];
       payload += '=' * (4 - payload.length % 4);
       final decoded = jsonDecode(utf8.decode(base64.decode(payload)));
@@ -85,24 +84,20 @@ class TokenManager {
     required String refreshToken,
   }) async {
     try {
-      // Decode payload to validate
       final payload = _decodeToken(accessToken);
       if (payload == null) {
         throw Exception('Invalid access token format');
       }
 
-      // Save to Hive storage
       await tokenStorage.saveTokens(
         accessToken: accessToken,
         refreshToken: refreshToken,
       );
 
-      // Schedule auto refresh
       _scheduleTokenRefresh(payload);
 
       print('✓ Tokens saved to Hive storage');
-      print(
-          '  Access token expires in: ${payload.timeUntilExpiry.inMinutes} minutes');
+      print('  Access token expires in: ${payload.timeUntilExpiry.inMinutes} minutes');
     } catch (e) {
       print('Error saving tokens: $e');
       rethrow;
@@ -112,7 +107,6 @@ class TokenManager {
   /// Update access token
   Future<void> updateAccessToken(String newAccessToken) async {
     try {
-      // Decode to validate
       final payload = _decodeToken(newAccessToken);
       if (payload == null) {
         throw Exception('Invalid access token format');
@@ -123,13 +117,11 @@ class TokenManager {
         throw Exception('Refresh token not found');
       }
 
-      // Save updated token
       await tokenStorage.saveTokens(
         accessToken: newAccessToken,
         refreshToken: refreshToken,
       );
 
-      // Reschedule refresh
       _scheduleTokenRefresh(payload);
 
       print('✓ Access token updated');
@@ -156,7 +148,6 @@ class TokenManager {
   void _scheduleTokenRefresh(TokenPayload payload) {
     _refreshTimer?.cancel();
 
-    // Refresh 5 minutes before expiry
     final timeUntilRefresh = payload.timeUntilExpiry - Duration(minutes: 5);
 
     if (timeUntilRefresh.isNegative) {
@@ -166,9 +157,7 @@ class TokenManager {
     }
 
     _refreshTimer = Timer(timeUntilRefresh, _handleTokenRefresh);
-
-    print(
-        '📅 Token refresh scheduled in ${timeUntilRefresh.inMinutes} minutes');
+    print('📅 Token refresh scheduled in ${timeUntilRefresh.inMinutes} minutes');
   }
 
   Future<void> _handleTokenRefresh() async {
@@ -225,7 +214,6 @@ class TokenManager {
     };
   }
 
-  /// Debug: Print token details
   void debugPrintTokenInfo() {
     final status = getTokenStatus();
     print('=== Token Status ===');

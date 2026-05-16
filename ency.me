@@ -1,0 +1,91 @@
+Encryption implementation overview
+=================================
+
+Summary
+-------
+This project implements a simple hybrid encryption scheme (AES + RSA) for message-level confidentiality.
+
+Key generation & storage
+------------------------
+- RSA key pair (2048-bit) is generated on-device by `EncryptionService.generateKeyPair()`.
+- The PEM-encoded private and public keys are stored in `FlutterSecureStorage` keys: `e2ee_private_key` and `e2ee_public_key`.
+- The public key should be uploaded to the server (not implemented here) so other users can fetch it and encrypt messages to this device.
+
+Message encryption (sending)
+----------------------------
+1. The client generates a random 32-byte AES key and a 16-byte IV.
+2. The plaintext message is encrypted with AES-256-CBC (via the `encrypt` package) using that AES key and IV.
+3. The AES key (base64) is encrypted (wrapped) with the recipient's RSA public key (PEM) using RSA encryption.
+4. The client sends the following fields to the server / over the socket:
+   - `encrypted_payload`: base64 AES ciphertext
+   - `encrypted_key`: base64 RSA-wrapped AES key
+   - `iv`: base64 IV
+   - plus metadata: `room_id`, `timestamp`, `client_message_id`, `recipient_id`
+
+Message decryption (receiving)
+------------------------------
+1. The recipient receives a message containing the three encrypted fields above.
+2. The client loads its private RSA key from secure storage and uses it to decrypt `encrypted_key` → yields AES key (base64).
+3. The client uses the AES key and `iv` to decrypt `encrypted_payload` and obtain plaintext.
+
+Wire-format / API contract
+--------------------------
+Secure messages follow the `secure_message` type in the socket layer. The payload includes:
+
+- `type`: "secure_message"
+- `recipient_id`: numeric id of the recipient
+- `encrypted_payload`: base64 string
+- `encrypted_key`: base64 string (RSA-wrapped AES key)
+- `iv`: base64 string
+- `room_id`, `timestamp`, `client_message_id`
+
+Where to look in the code
+-------------------------
+- Encryption core: [flutter/lib/services/realtime/encryption_service.dart](flutter/lib/services/realtime/encryption_service.dart)
+- Sender / socket usage: [flutter/lib/services/realtime/socket_service.dart](flutter/lib/services/realtime/socket_service.dart) — see `sendSecureMessage()` and `_handleSecureIncoming()`.
+- Chat-related helpers: [flutter/lib/services/realtime/chat_service.dart](flutter/lib/services/realtime/chat_service.dart)
+- Dependencies: `encrypt`, `pointycastle`, `flutter_secure_storage` (see `flutter/pubspec.yaml`).
+
+Limitations & recommendations
+-----------------------------
+- Current design uses RSA key wrapping and AES for content. This works but has limitations:
+  - No forward secrecy (RSA static keys).
+  - No message authentication/signatures beyond relying on transport TLS and server checks.
+  - Multi-device: private key is local to the device. If the user logs in on new device, key synchronization is not implemented; the server must support publishing per-device public keys and routing by device.
+  - No key rotation or revocation flow is provided in code.
+
+Recommended improvements for production E2EE
+------------------------------------------
+- Use an authenticated key agreement (X25519 / Curve25519) for forward secrecy and derive AES keys per-session.
+- Add message signatures (Ed25519) or authenticated encryption (AES-GCM) to avoid tampering.
+- Implement per-device public key registration on the backend and server-side device routing.
+- Consider using established libraries/protocols (e.g., libsodium, Signal protocol) when high security is required.
+
+Quick test example (Dart)
+-------------------------
+Use the existing `EncryptionService` API to smoke-test locally:
+
+1. Generate keys (run once):
+
+   final svc = EncryptionService();
+   await svc.generateKeyPair();
+
+2. Get your public key and encrypt to yourself (or another user's public key):
+
+   final publicKey = await svc.getLocalPublicKey();
+   final enc = await svc.encryptMessage('hello', publicKey!);
+
+3. Decrypt using local private key:
+
+   final plain = await svc.decryptMessage(
+     encryptedPayload: enc['encrypted_payload']!,
+     encryptedKey: enc['encrypted_key']!,
+     ivBase64: enc['iv']!,
+   );
+
+If `plain == 'hello'`, the round-trip works.
+
+Questions / next steps
+----------------------
+- Want me to add a unit test that runs the quick test example above?
+- Want a backend endpoint to collect and publish per-device public keys?

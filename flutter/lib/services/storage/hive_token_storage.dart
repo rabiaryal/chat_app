@@ -1,8 +1,10 @@
 /// Hive-based token storage service for secure token persistence
+import 'dart:convert';
+
 import 'package:hive_flutter/hive_flutter.dart';
 
 class HiveTokenStorage {
-  static const String _boxName = 'chat_tokens';
+  static const String _boxName = 'settings';
   static const String _accessTokenKey = 'access_token';
   static const String _refreshTokenKey = 'refresh_token';
 
@@ -31,8 +33,11 @@ class HiveTokenStorage {
     if (_isInitialized) return;
 
     try {
-      await Hive.initFlutter();
-      _tokenBox = await Hive.openBox<String>(_boxName);
+      if (Hive.isBoxOpen(_boxName)) {
+        _tokenBox = Hive.box<String>(_boxName);
+      } else {
+        _tokenBox = await Hive.openBox<String>(_boxName);
+      }
       _isInitialized = true;
       print('✓ Hive token storage initialized');
     } catch (e) {
@@ -97,12 +102,54 @@ class HiveTokenStorage {
       return false;
     }
     try {
-      return _tokenBox.containsKey(_accessTokenKey) &&
-          _tokenBox.containsKey(_refreshTokenKey);
+      return _tokenBox.containsKey(_accessTokenKey);
     } catch (e) {
       print('✗ Error checking tokens: $e');
       return false;
     }
+  }
+
+  /// Check whether an access token is available locally.
+  bool hasAccessToken() {
+    return getAccessToken() != null;
+  }
+
+  /// Resolve the current user id from the stored JWT access token.
+  ///
+  /// This is used as a namespace for local caches so multiple accounts on the
+  /// same device do not share the same Hive records.
+  String? getCurrentUserId() {
+    final accessToken = getAccessToken();
+    if (accessToken == null) {
+      return null;
+    }
+
+    try {
+      final parts = accessToken.split('.');
+      if (parts.length != 3) {
+        return null;
+      }
+
+      var payload = parts[1].replaceAll('-', '+').replaceAll('_', '/');
+      switch (payload.length % 4) {
+        case 2:
+          payload += '==';
+          break;
+        case 3:
+          payload += '=';
+          break;
+      }
+
+      final decoded = jsonDecode(utf8.decode(base64.decode(payload)));
+      if (decoded is Map<String, dynamic>) {
+        final rawUserId = decoded['user_id'] ?? decoded['sub'];
+        return rawUserId?.toString();
+      }
+    } catch (e) {
+      print('✗ Error reading current user id from token: $e');
+    }
+
+    return null;
   }
 
   /// Clear all tokens (logout)

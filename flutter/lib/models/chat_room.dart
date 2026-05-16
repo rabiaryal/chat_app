@@ -44,14 +44,15 @@ class ChatRoom {
   });
 
   factory ChatRoom.fromJson(Map<String, dynamic> json) {
-    final id = json['id'];
-    if (id == null || (id is! String && id is! int)) {
-      throw FormatException('Invalid room ID: $id (type: ${id.runtimeType})');
-    }
+    final rawId = _extractRoomId(json);
+    final roomId = rawId?.toString() ?? '';
 
     return ChatRoom(
-      id: id.toString(),
-      name: json['name'] as String? ?? 'Chat',
+      id: roomId,
+      name: (json['name'] as String?) ??
+          (json['room_name'] as String?) ??
+          (json['title'] as String?) ??
+          'Chat',
       description: json['description'] as String? ?? '',
       roomType: json['room_type'] as String? ?? 'GROUP',
       creatorId: json['creator_id'] as int? ?? 0,
@@ -59,15 +60,12 @@ class ChatRoom {
       participants: json['participants'] as List<dynamic>? ?? [],
       participantsCount: json['participants_count'] as int? ?? 0,
       isActive: json['is_active'] as bool? ?? true,
-      createdAt: DateTime.parse(
-          json['created_at'] as String? ?? DateTime.now().toIso8601String()),
-      updatedAt: DateTime.parse(
-          json['updated_at'] as String? ?? DateTime.now().toIso8601String()),
+      createdAt: _parseDateTime(json['created_at']) ?? DateTime.now(),
+      updatedAt: _parseDateTime(json['updated_at']) ?? DateTime.now(),
       lastMessage: json['last_message'] as String?,
       lastMessageTimestamp: json['last_message_timestamp'] != null
-          ? DateTime.parse(json['last_message_timestamp'] as String)
-          : DateTime.parse(json['updated_at'] as String? ??
-              DateTime.now().toIso8601String()),
+          ? _parseDateTime(json['last_message_timestamp']) ?? DateTime.now()
+          : (_parseDateTime(json['updated_at']) ?? DateTime.now()),
       lastMessageSenderId: json['last_message_sender_id'] as int?,
       unreadCount: json['unread_count'] as int? ?? 0,
       otherParticipantName: json['other_participant_name'] as String? ?? '',
@@ -159,7 +157,7 @@ class RoomsListResponse {
       results: (json['results'] as List<dynamic>)
           .map((e) => ChatRoom.fromJson(e as Map<String, dynamic>))
           .toList(),
-      count: json['count'] as int,
+      count: json['count'] as int? ?? (json['results'] as List<dynamic>).length,
     );
   }
 }
@@ -180,4 +178,29 @@ class OperationResponse {
       data: json['user'] ?? json['room'] ?? json['data'],
     );
   }
+}
+
+dynamic _extractRoomId(Map<String, dynamic> json) {
+  final directId =
+      json['id'] ?? json['room_id'] ?? json['roomId'] ?? json['pk'];
+  if (directId != null) {
+    return directId;
+  }
+
+  final nestedRoom = json['room'];
+  if (nestedRoom is Map) {
+    return _extractRoomId(Map<String, dynamic>.from(nestedRoom));
+  }
+
+  return null;
+}
+
+DateTime? _parseDateTime(dynamic value) {
+  if (value == null) {
+    return null;
+  }
+  if (value is DateTime) {
+    return value;
+  }
+  return DateTime.tryParse(value.toString());
 }

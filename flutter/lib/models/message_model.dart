@@ -12,6 +12,7 @@ class MessageModel {
   final MessageType type;
   final MessageStatus status;
   final bool isSeen;
+  final bool isPending;
 
   const MessageModel({
     required this.id,
@@ -24,7 +25,36 @@ class MessageModel {
     this.type = MessageType.text,
     this.status = MessageStatus.delivered,
     this.isSeen = false,
+    this.isPending = false,
   });
+
+  MessageModel copyWith({
+    String? id,
+    String? text,
+    DateTime? timestamp,
+    String? roomId,
+    int? userId,
+    String? username,
+    bool? isBot,
+    MessageType? type,
+    MessageStatus? status,
+    bool? isSeen,
+    bool? isPending,
+  }) {
+    return MessageModel(
+      id: id ?? this.id,
+      text: text ?? this.text,
+      timestamp: timestamp ?? this.timestamp,
+      roomId: roomId ?? this.roomId,
+      userId: userId ?? this.userId,
+      username: username ?? this.username,
+      isBot: isBot ?? this.isBot,
+      type: type ?? this.type,
+      status: status ?? this.status,
+      isSeen: isSeen ?? this.isSeen,
+      isPending: isPending ?? this.isPending,
+    );
+  }
 
   factory MessageModel.fromChatMessage(ChatMessage message) {
     return MessageModel(
@@ -38,6 +68,7 @@ class MessageModel {
       type: message.type,
       status: message.status,
       isSeen: message.status == MessageStatus.read,
+      isPending: message.status == MessageStatus.sending,
     );
   }
 
@@ -52,10 +83,13 @@ class MessageModel {
       username: json['username']?.toString() ?? 'Unknown',
       isBot: json['is_bot'] == true,
       type: _parseMessageType(json['message_type']?.toString() ?? 'TEXT'),
-      status: json['is_read'] == true 
-          ? MessageStatus.read 
+      status: json['is_read'] == true
+          ? MessageStatus.read
           : _parseMessageStatus(json['status']?.toString() ?? 'delivered'),
       isSeen: json['is_seen'] == true || json['is_read'] == true,
+      isPending: json['is_pending'] == true ||
+          _parseMessageStatus(json['status']?.toString() ?? 'delivered') ==
+              MessageStatus.sending,
     );
   }
 
@@ -86,6 +120,7 @@ class MessageModel {
       'status': status.name,
       'is_read': isSeen || status == MessageStatus.read,
       'is_seen': isSeen,
+      'is_pending': isPending || status == MessageStatus.sending,
     };
   }
 

@@ -1,32 +1,61 @@
 # System Architecture
 
-This project is a real-time chat application built with a modern, scalable stack.
+This project uses a **hybrid layered architecture** with **MVVM-inspired state management** on Flutter.
 
-## Tech Stack
-- **Frontend**: [Flutter](https://flutter.dev) (Dart)
-- **Backend**: [Django](https://www.djangoproject.com/) & [Django REST Framework](https://www.django-rest-framework.org/) (Python)
-- **Real-time**: [Django Channels](https://channels.readthedocs.io/) (WebSockets)
-- **Database**: [PostgreSQL](https://www.postgresql.org/)
-- **Caching/Persistence**: [Hive](https://docs.hivedb.dev/) (Local storage for Flutter)
-- **Containerization**: [Docker](https://www.docker.com/) & Docker Compose
+It is best described as:
 
-## Core Components
+- **Frontend**: Layered + Provider (MVVM style)
+- **Backend**: Django modular monolith (MVT + DRF + Channels)
+- **Realtime**: WebSocket event-driven messaging
 
-### 1. Backend (backend_core)
-The backend handles authentication, room management, friend requests, and real-time message broadcasting.
-- **REST API**: Standard CRUD operations for users, rooms, and friends.
-- **Consumers**: WebSocket handlers in `consumers.py` for real-time events.
-- **Models**: `User`, `Room`, `Message`, `Friendship`.
+## Architecture Style Used
 
-### 2. Frontend (flutter)
-The mobile app follows a clean architecture pattern with state management provided by `Provider`.
-- **Services**: Low-level logic for APIs (`ApiService`) and WebSockets (`ChatService`).
-- **Providers**: State management layer (`AuthProvider`, `ChatProvider`, `RoomProvider`, `FriendProvider`).
-- **Models**: Data structures mapping to JSON responses.
-- **Widgets/Screens**: UI layer built with standard Flutter widgets.
+## Flutter App: MVVM-Inspired Layered Architecture
 
-## Data Flow
-1. **Auth**: User logs in -> JWT received -> Stored in Hive -> Used in `AuthInterceptor`.
-2. **Chat List**: App loads rooms from `RoomProvider` -> Sorts by `last_message_timestamp`.
-3. **Messaging**: WebSocket connection established -> Messages sent via Socket -> Server broadcasts to group -> Clients update local state and Hive cache.
-4. **Offline Support**: Hive caches messages and room info for instant loading and offline viewing.
+The Flutter side is not strict Clean Architecture. It follows a practical MVVM-style split:
+
+- **View**:
+	- `screens/` and `widgets/`
+	- Responsible for rendering UI and user interactions.
+- **ViewModel / State Layer**:
+	- `providers/` (`AuthProvider`, `RoomProvider`, `ChatProvider`, `FriendProvider`)
+	- Holds UI state, orchestrates user flows, notifies UI via `ChangeNotifier`.
+- **Model + Data Layer**:
+	- `models/` define data contracts.
+	- `services/` (`ApiService`, `ChatService`, `NotificationService`) handle REST, WebSocket, FCM, and persistence interactions.
+	- Local persistence (`Hive`) supports token/session and offline-friendly UX.
+
+So if you want a short label: **Provider-based MVVM (layered)**.
+
+## Backend: Django Modular Monolith
+
+The backend is a single Django project composed of app modules:
+
+- **REST Layer (DRF)**: HTTP endpoints for auth, users, friends, rooms, messages, devices.
+- **Realtime Layer (Channels)**: WebSocket consumers for live chat events.
+- **Domain/Data Layer**: Django models + services + serializers.
+
+This is not microservices; it is a **modular monolith**.
+
+## High-Level Request Flow
+
+1. UI action happens in a `screen`.
+2. `Provider` (ViewModel) handles intent and state.
+3. `Provider` calls `Service` (`ApiService` or `ChatService`).
+4. Service talks to Django via REST or WebSocket.
+5. Response/event is mapped into `Model`.
+6. Provider updates state and notifies listeners.
+7. UI rebuilds from updated state.
+
+## Key Cross-Cutting Patterns
+
+- **Centralized API constants** for endpoint standardization.
+- **Dio interceptor** for JWT injection and token refresh.
+- **Hive** for local token/cache persistence.
+- **Firebase Messaging** for push notifications.
+
+## Practical Classification
+
+If someone asks "What architecture is this project using?" you can answer:
+
+"It uses a **hybrid layered architecture** with **Provider-based MVVM** on Flutter, backed by a **Django modular monolith** using DRF + Channels."

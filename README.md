@@ -31,12 +31,24 @@ The Flutter app is the primary user-facing client. It handles authentication, ro
 
 The Flutter app uses the **Provider** pattern to keep UI, network state, and local persistence separated. Each provider owns one part of the app state and the screens rebuild only when the relevant data changes.
 
-### Providers
+### Providers (State Management)
+
+Providers manage the application's state and business logic, acting as the bridge between services and the UI.
 
 - **AuthProvider**: Owns authentication state, session restore, logout, and the current login status.
-- **RoomProvider**: Owns the room list, unread counts, room refreshes, and room-level read state.
-- **ChatProvider**: Owns the active room conversation, message stream, typing state, read receipts, and message persistence for the open chat.
-- **FriendProvider**: Owns friend lists, incoming/outgoing requests, and friend actions like request, accept, reject, and remove.
+- **RoomProvider**: Manages the room list, unread counts, room refreshes, and room-level read state.
+- **ChatProvider**: Manages the active room conversation, message stream, typing state, read receipts, and message persistence.
+- **FriendProvider**: Manages friend lists, incoming/outgoing requests, and discovery actions.
+
+### Services (Infrastructure)
+
+Services handle low-level operations, external communications, and data persistence.
+
+- **ApiService**: Centralized REST API handler using `Dio` and `fpdart` for functional error handling.
+- **ChatService**: Manages the WebSocket lifecycle, connection monitoring, and real-time message routing.
+- **HiveTokenStorage**: Provides secure local persistence for JWT tokens using Hive.
+- **NotificationService**: Manages Firebase Cloud Messaging (FCM) registration and push notification handling.
+- **EncryptionService**: Handles End-to-End Encryption (E2EE) key generation and RSA/AES message security.
 
 ### How the State Flows
 

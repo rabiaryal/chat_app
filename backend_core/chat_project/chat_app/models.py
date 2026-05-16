@@ -32,15 +32,14 @@ class ChatRoom(models.Model):
     """
     Model for chat rooms/conversations.
     """
-    ROOM_TYPES = (
-        ('DM', 'Direct Message'),
-        ('GROUP', 'Group Chat'),
-    )
+    class RoomType(models.TextChoices):
+        DM = 'DM', 'Direct Message'
+        GROUP = 'GROUP', 'Group Chat'
 
     id = models.CharField(max_length=36, primary_key=True)
     name = models.CharField(max_length=255)
     description = models.TextField(blank=True, null=True)
-    room_type = models.CharField(max_length=10, choices=ROOM_TYPES, default='DM')
+    room_type = models.CharField(max_length=10, choices=RoomType.choices, default=RoomType.DM)
     participants = models.ManyToManyField(CustomUser, related_name='chat_rooms')
     creator = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='created_rooms')
     is_active = models.BooleanField(default=True)
@@ -58,18 +57,17 @@ class Message(models.Model):
     """
     Model for individual messages in chat rooms.
     """
-    MESSAGE_TYPES = (
-        ('TEXT', 'Text Message'),
-        ('IMAGE', 'Image'),
-        ('FILE', 'File'),
-        ('AI_RESPONSE', 'AI Response'),
-    )
+    class MessageType(models.TextChoices):
+        TEXT = 'TEXT', 'Text Message'
+        IMAGE = 'IMAGE', 'Image'
+        FILE = 'FILE', 'File'
+        AI_RESPONSE = 'AI_RESPONSE', 'AI Response'
 
     id = models.CharField(max_length=36, primary_key=True)
     room = models.ForeignKey(ChatRoom, on_delete=models.CASCADE, related_name='messages')
     sender = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='sent_messages')
     content = models.TextField()
-    message_type = models.CharField(max_length=20, choices=MESSAGE_TYPES, default='TEXT')
+    message_type = models.CharField(max_length=20, choices=MessageType.choices, default=MessageType.TEXT)
     file = models.FileField(upload_to='messages/', blank=True, null=True)
     is_read = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -87,12 +85,11 @@ class Friendship(models.Model):
     Model for managing friendship requests and relationships between users.
     Implements a Request → Accept → Chat flow.
     """
-    STATUS_CHOICES = (
-        ('PENDING', 'Pending'),
-        ('ACCEPTED', 'Accepted'),
-        ('BLOCKED', 'Blocked'),
-        ('REJECTED', 'Rejected'),
-    )
+    class Status(models.TextChoices):
+        PENDING = 'PENDING', 'Pending'
+        ACCEPTED = 'ACCEPTED', 'Accepted'
+        BLOCKED = 'BLOCKED', 'Blocked'
+        REJECTED = 'REJECTED', 'Rejected'
 
     from_user = models.ForeignKey(
         CustomUser,
@@ -104,7 +101,7 @@ class Friendship(models.Model):
         on_delete=models.CASCADE,
         related_name='friendship_requests_received'
     )
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

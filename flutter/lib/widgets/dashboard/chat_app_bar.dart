@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import '../../models/user.dart';
-import '../../screens/user_profile_screen.dart';
 
 class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
   final Color primaryColor;
@@ -8,7 +8,7 @@ class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
   final VoidCallback onLogout;
 
   const ChatAppBar({
-    Key? key, 
+    Key? key,
     required this.primaryColor,
     this.currentUser,
     required this.onLogout,
@@ -38,16 +38,10 @@ class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
           child: GestureDetector(
             onTap: () {
               if (currentUser != null) {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => UserProfileScreen(
-                      user: currentUser!,
-                      onLogout: onLogout,
-                      isCurrentUser: true,
-                    ),
-                  ),
-                );
+                context.push('/user-profile', extra: {
+                  'user': currentUser!,
+                  'isCurrentUser': true,
+                });
               }
             },
             child: Center(

@@ -1,10 +1,9 @@
 import 'package:chat_app/providers/chat_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../models/friend.dart';
-import '../providers/friend_provider.dart';
-import '../providers/room_provider.dart';
-import '../services/api_service.dart';
+import '../../providers/friend_provider.dart';
+import '../../providers/room_provider.dart';
+import '../../services/api_service.dart';
 import 'chat_screen.dart';
 
 class CreateGroupScreen extends StatefulWidget {
@@ -55,46 +54,49 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
 
     setState(() => _isCreating = true);
 
-    try {
-      final apiService = context.read<ApiService>();
-      final room = await apiService.createGroup(
-        name: name,
-        description: _descriptionController.text.trim(),
-        participantIds: _selectedFriendIds.toList(),
-      );
+    final apiService = context.read<ApiService>();
+    final result = await apiService.createGroup(
+      name: name,
+      description: _descriptionController.text.trim(),
+      participantIds: _selectedFriendIds.toList(),
+    ).run();
 
-      if (!mounted) return;
+    result.fold(
+      (failure) {
+        if (mounted) {
+          setState(() => _isCreating = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Failed to create group: ${failure.message}')),
+          );
+        }
+      },
+      (room) {
+        if (!mounted) return;
 
-      // Add the new group to RoomProvider
-      final roomProvider = context.read<RoomProvider>();
-      roomProvider.addRoom(room);
+        // Add the new group to RoomProvider
+        final roomProvider = context.read<RoomProvider>();
+        roomProvider.addRoom(room);
 
-      // Navigate to the new chat screen
-      final chatProvider = context.read<ChatProvider>();
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (context) => ChangeNotifierProvider.value(
-            value: chatProvider,
-            child: ChatScreen(
-              roomId: room.id,
-              roomName: room.name,
-              userId: room.creatorId,
-              username: room.name, // For groups, we use room name as username
-              friendId: 0, // Not applicable for groups
-              isGroup: true,
+        // Navigate to the new chat screen
+        final chatProvider = context.read<ChatProvider>();
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (context) => ChangeNotifierProvider.value(
+              value: chatProvider,
+              child: ChatScreen(
+                roomId: room.id,
+                roomName: room.name,
+                userId: room.creatorId,
+                username: room.name, // For groups, we use room name as username
+                friendId: 0, // Not applicable for groups
+                isGroup: true,
+              ),
             ),
           ),
-        ),
-      );
-    } catch (e) {
-      if (mounted) {
-        setState(() => _isCreating = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to create group: $e')),
         );
-      }
-    }
+      },
+    );
   }
 
   @override

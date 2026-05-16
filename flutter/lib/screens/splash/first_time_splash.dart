@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_screenutil/flutter_screenutil.dart';
+import 'package:go_router/go_router.dart';
 
 class FirstTimeSplashScreen extends StatelessWidget {
   const FirstTimeSplashScreen({Key? key}) : super(key: key);
@@ -17,15 +19,15 @@ class FirstTimeSplashScreen extends StatelessWidget {
             // Centered circular logo like Facebook
             Center(
               child: Container(
-                width: 140,
-                height: 140,
+                width: 140.w,
+                height: 140.w,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   boxShadow: [
                     BoxShadow(
                       color: Colors.black.withOpacity(0.12),
-                      blurRadius: 12,
-                      offset: const Offset(0, 6),
+                      blurRadius: 12.r,
+                      offset: Offset(0, 6.h),
                     ),
                   ],
                 ),
@@ -38,7 +40,7 @@ class FirstTimeSplashScreen extends StatelessWidget {
                       child: Center(
                         child: Icon(
                           Icons.chat_bubble_outline,
-                          size: 64,
+                          size: 64.sp,
                           color: Colors.white,
                         ),
                       ),
@@ -48,34 +50,37 @@ class FirstTimeSplashScreen extends StatelessWidget {
               ),
             ),
 
-            const SizedBox(height: 24),
+            SizedBox(height: 24.h),
             Text(
               'Welcome to Chat App',
-              style: theme.textTheme.headlineSmall,
+              style: theme.textTheme.headlineSmall?.copyWith(
+                fontSize: 24.sp,
+              ),
             ),
-            const SizedBox(height: 8),
+            SizedBox(height: 8.h),
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 40.0),
+              padding: EdgeInsets.symmetric(horizontal: 40.w),
               child: Text(
                 'Connect with friends and family. Create groups, chat securely, and share moments.',
                 textAlign: TextAlign.center,
-                style: theme.textTheme.bodyMedium,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  fontSize: 14.sp,
+                ),
               ),
             ),
             const Spacer(),
 
             // Next button pinned to bottom
             Padding(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 16.0, vertical: 20.0),
+              padding: EdgeInsets.symmetric(horizontal: 16.w, vertical: 20.h),
               child: SizedBox(
                 width: double.infinity,
-                height: 52,
+                height: 52.h,
                 child: ElevatedButton(
                   onPressed: () {
-                    Navigator.of(context).pushReplacementNamed('/auth');
+                    context.go('/auth');
                   },
-                  child: const Text('Next'),
+                  child: Text('Next', style: TextStyle(fontSize: 16.sp)),
                 ),
               ),
             ),

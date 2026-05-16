@@ -3,7 +3,8 @@ import 'package:flutter/foundation.dart';
 import '../models/chat_room.dart';
 import '../models/chat_message.dart';
 import '../services/api_service.dart';
-import '../services/chat_service.dart';
+import '../services/realtime/chat_service.dart';
+import '../constants/api_constant.dart';
 
 class RoomProvider extends ChangeNotifier {
   final ApiService apiService;
@@ -69,18 +70,15 @@ class RoomProvider extends ChangeNotifier {
     } else {
       // NEW: If room not found, it might be a new connection/friendship
       // Fetch the room details from API and add it
-      try {
-        final response =
-            await apiService.dio.get('/api/v1/rooms/${message.roomId}/');
-        if (response.statusCode == 200) {
-          final newRoom = ChatRoom.fromJson(response.data);
+      final result = await apiService.getRoom(message.roomId).run();
+      result.fold(
+        (failure) => print('✗ Failed to fetch new room details: ${failure.message}'),
+        (newRoom) {
           _rooms.insert(0, newRoom);
           notifyListeners();
           print('✓ New room discovered and added: ${newRoom.name}');
-        }
-      } catch (e) {
-        print('✗ Failed to fetch new room details: $e');
-      }
+        },
+      );
     }
   }
 
@@ -92,56 +90,56 @@ class RoomProvider extends ChangeNotifier {
       notifyListeners();
 
       if (oldUnreadCount > 0) {
-        try {
-          await apiService.dio.post('/api/v1/rooms/$roomId/read/');
-          print('✓ Room $roomId marked as read on server');
-        } catch (e) {
-          print('✗ Failed to mark room as read on server: $e');
-        }
+        final result = await apiService.markRoomAsRead(roomId).run();
+        result.fold(
+          (failure) => print('✗ Failed to mark room as read on server: ${failure.message}'),
+          (_) => print('✓ Room $roomId marked as read on server'),
+        );
       }
     }
   }
 
   Future<void> deleteRoom(String roomId) async {
-    try {
-      // Remove current user from room members (leave room)
-      // This works for all participants, not just creators
-      await apiService.dio.delete('/api/v1/rooms/$roomId/members/');
-      _rooms.removeWhere((r) => r.id == roomId);
-      notifyListeners();
-      print('✓ Room $roomId deleted');
-    } catch (e) {
-      print('✗ Failed to delete room: $e');
-      rethrow;
-    }
+    final result = await apiService.leaveRoom(roomId).run();
+    result.fold(
+      (failure) {
+        print('✗ Failed to delete room: ${failure.message}');
+        _error = failure.message;
+        notifyListeners();
+      },
+      (_) {
+        _rooms.removeWhere((r) => r.id == roomId);
+        notifyListeners();
+        print('✓ Room $roomId deleted');
+      },
+    );
   }
 
   Future<void> addMember(String roomId, int userId) async {
-    try {
-      await apiService.dio.post(
-        '/api/v1/rooms/$roomId/members/',
-        data: {'user_id': userId},
-      );
-      print('✓ Member $userId added to room $roomId');
-    } catch (e) {
-      print('✗ Failed to add member: $e');
-      rethrow;
-    }
+    final result = await apiService.addRoomMember(roomId: roomId, userId: userId).run();
+    result.fold(
+      (failure) {
+        print('✗ Failed to add member: ${failure.message}');
+        _error = failure.message;
+        notifyListeners();
+      },
+      (_) => print('✓ Member $userId added to room $roomId'),
+    );
   }
 
   Future<void> removeMember(String roomId, int userId) async {
-    try {
-      final resp =
-          await apiService.removeRoomMember(roomId: roomId, userId: userId);
-      print(
-          '✓ Member $userId removed from room $roomId — server responded: ${resp['message'] ?? ''}');
-
-      // Optionally notify listeners so UI can refresh where needed
-      notifyListeners();
-    } catch (e) {
-      print('✗ Failed to remove member: $e');
-      rethrow;
-    }
+    final result = await apiService.removeRoomMember(roomId: roomId, userId: userId).run();
+    result.fold(
+      (failure) {
+        print('✗ Failed to remove member: ${failure.message}');
+        _error = failure.message;
+        notifyListeners();
+      },
+      (resp) {
+        print('✓ Member $userId removed from room $roomId — server responded: ${resp['message'] ?? ''}');
+        notifyListeners();
+      },
+    );
   }
 
   List<ChatRoom> get rooms => _rooms;
@@ -153,16 +151,20 @@ class RoomProvider extends ChangeNotifier {
     _error = null;
     notifyListeners();
 
-    try {
-      _rooms = await apiService.getRooms();
-      _isLoading = false;
-      notifyListeners();
-    } catch (e) {
-      _error = e.toString();
-      _isLoading = false;
-      notifyListeners();
-      print('✗ Failed to load rooms: $e');
-    }
+    final result = await apiService.getRooms().run();
+    result.fold(
+      (failure) {
+        _error = failure.message;
+        _isLoading = false;
+        notifyListeners();
+        print('✗ Failed to load rooms: ${failure.message}');
+      },
+      (rooms) {
+        _rooms = rooms;
+        _isLoading = false;
+        notifyListeners();
+      },
+    );
   }
 
   void addRoom(ChatRoom room) {

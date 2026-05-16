@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../models/user.dart';
-import '../../screens/friends_list_screen.dart';
+import '../../screens/chat/friends_list_screen.dart';
 
 class DashboardBottomNav extends StatelessWidget {
   final int selectedIndex;
