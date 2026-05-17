@@ -1,7 +1,7 @@
 /// Friend State Management using Provider
 import 'package:flutter/foundation.dart';
 import '../models/friend.dart';
-import '../models/user.dart';
+import '../features/auth/models/user.dart';
 import '../services/api_service.dart';
 import '../services/storage/friend_persistence_service.dart';
 
@@ -45,7 +45,7 @@ class FriendProvider extends ChangeNotifier {
       if (!_hasMoreFriends || _isLoadingMore || _isLoading) return;
       _isLoadingMore = true;
     }
-    
+
     _error = null;
     notifyListeners();
 
@@ -53,21 +53,24 @@ class FriendProvider extends ChangeNotifier {
     if (refresh && _friends.isEmpty) {
       final cachedUsers = await _persistenceService.getCachedFriends();
       if (cachedUsers.isNotEmpty) {
-        _friends = cachedUsers.map((user) => Friend(
-          id: user.id,
-          username: user.username,
-          firstName: user.firstName,
-          lastName: user.lastName,
-          email: user.email,
-          isOnline: user.isOnline,
-          lastSeen: user.lastSeen,
-        )).toList();
+        _friends = cachedUsers
+            .map((user) => Friend(
+                  id: user.id,
+                  username: user.username,
+                  firstName: user.firstName,
+                  lastName: user.lastName,
+                  email: user.email,
+                  isOnline: user.isOnline,
+                  lastSeen: user.lastSeen,
+                ))
+            .toList();
         notifyListeners();
       }
     }
 
-    final result = await apiService.getFriends(page: _currentPage, limit: 10).run();
-    
+    final result =
+        await apiService.getFriends(page: _currentPage, limit: 10).run();
+
     result.fold(
       (failure) {
         _error = failure.message;
@@ -77,15 +80,17 @@ class FriendProvider extends ChangeNotifier {
         print('✗ Failed to load friends: ${failure.message}');
       },
       (userList) async {
-        final mappedFriends = userList.map((user) => Friend(
-              id: user.id,
-              username: user.username,
-              firstName: user.firstName,
-              lastName: user.lastName,
-              email: user.email,
-              isOnline: user.isOnline,
-              lastSeen: user.lastSeen,
-            )).toList();
+        final mappedFriends = userList
+            .map((user) => Friend(
+                  id: user.id,
+                  username: user.username,
+                  firstName: user.firstName,
+                  lastName: user.lastName,
+                  email: user.email,
+                  isOnline: user.isOnline,
+                  lastSeen: user.lastSeen,
+                ))
+            .toList();
 
         if (refresh) {
           _friends = mappedFriends;
@@ -168,7 +173,7 @@ class FriendProvider extends ChangeNotifier {
     await loadFriends(refresh: true);
     await loadIncomingRequests();
     await loadOutgoingRequests();
-    
+
     _isLoading = false;
     notifyListeners();
   }
@@ -178,8 +183,9 @@ class FriendProvider extends ChangeNotifier {
     _error = null;
     notifyListeners();
 
-    final result = await apiService.sendFriendRequest(targetUserId: targetUserId).run();
-    
+    final result =
+        await apiService.sendFriendRequest(targetUserId: targetUserId).run();
+
     return result.fold(
       (failure) {
         _error = failure.message;
@@ -190,11 +196,11 @@ class FriendProvider extends ChangeNotifier {
       (_) async {
         // Reload outgoing requests quietly
         await loadOutgoingRequests(showLoading: false);
-        
+
         // Remove the successfully requested user from available suggestions/searches
         _suggestedUsers.removeWhere((user) => user.id == targetUserId);
         _searchResults.removeWhere((user) => user.id == targetUserId);
-        
+
         notifyListeners();
         print('✓ Friend request sent');
         return true;
@@ -274,17 +280,19 @@ class FriendProvider extends ChangeNotifier {
       },
       (_) async {
         _friends.removeWhere((friend) => friend.id == friendId);
-        
+
         // Sync with Hive cache
-        final userList = _friends.map((f) => User(
-          id: f.id,
-          username: f.username,
-          email: f.email,
-          firstName: f.firstName,
-          lastName: f.lastName,
-          isOnline: f.isOnline,
-          lastSeen: f.lastSeen,
-        )).toList();
+        final userList = _friends
+            .map((f) => User(
+                  id: f.id,
+                  username: f.username,
+                  email: f.email,
+                  firstName: f.firstName,
+                  lastName: f.lastName,
+                  isOnline: f.isOnline,
+                  lastSeen: f.lastSeen,
+                ))
+            .toList();
         await _persistenceService.replaceFriends(userList);
 
         _isLoading = false;
@@ -343,7 +351,8 @@ class FriendProvider extends ChangeNotifier {
     _error = null;
     notifyListeners();
 
-    final result = await apiService.getSuggestedUsers(page: page, limit: limit).run();
+    final result =
+        await apiService.getSuggestedUsers(page: page, limit: limit).run();
 
     result.fold(
       (failure) {
@@ -378,6 +387,27 @@ class FriendProvider extends ChangeNotifier {
     } catch (_) {
       return false;
     }
+  }
+
+  /// Update presence for a friend (called from realtime presence events)
+  void updatePresence(int userId, bool isOnline, DateTime? lastSeen) {
+    final idx = _friends.indexWhere((f) => f.id == userId);
+    if (idx == -1) return;
+
+    final f = _friends[idx];
+    final updated = Friend(
+      id: f.id,
+      username: f.username,
+      firstName: f.firstName,
+      lastName: f.lastName,
+      email: f.email,
+      isOnline: isOnline,
+      lastSeen: lastSeen ?? f.lastSeen,
+      avatar: f.avatar,
+    );
+
+    _friends[idx] = updated;
+    notifyListeners();
   }
 
   /// Clear search

@@ -1,18 +1,21 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:provider/provider.dart';
 import '../../providers/friend_provider.dart';
-import '../../providers/auth_provider.dart';
+import '../../features/auth/provider/auth_provider.dart';
 import '../../utils/snackbar_utils.dart';
 import 'package:go_router/go_router.dart';
 
-class SuggestedFriendsScreen extends StatefulWidget {
+class SuggestedFriendsScreen extends ConsumerStatefulWidget {
   const SuggestedFriendsScreen({Key? key}) : super(key: key);
 
   @override
-  State<SuggestedFriendsScreen> createState() => _SuggestedFriendsScreenState();
+  ConsumerState<SuggestedFriendsScreen> createState() =>
+      _SuggestedFriendsScreenState();
 }
 
-class _SuggestedFriendsScreenState extends State<SuggestedFriendsScreen> {
+class _SuggestedFriendsScreenState
+    extends ConsumerState<SuggestedFriendsScreen> {
   final Set<int> _addedUserIds = {};
 
   @override
@@ -25,15 +28,17 @@ class _SuggestedFriendsScreenState extends State<SuggestedFriendsScreen> {
 
   Future<void> _sendRequest(int userId) async {
     setState(() => _addedUserIds.add(userId));
-    final success = await context.read<FriendProvider>().sendFriendRequest(userId);
-    
+    final success =
+        await context.read<FriendProvider>().sendFriendRequest(userId);
+
     if (mounted) {
       if (success) {
         SnackbarUtils.showSuccess(context, 'Friend request sent!');
       } else {
         setState(() => _addedUserIds.remove(userId));
         final error = context.read<FriendProvider>().error;
-        SnackbarUtils.showError(context, error ?? 'Failed to send friend request');
+        SnackbarUtils.showError(
+            context, error ?? 'Failed to send friend request');
       }
     }
   }
@@ -57,7 +62,7 @@ class _SuggestedFriendsScreenState extends State<SuggestedFriendsScreen> {
         actions: [
           TextButton(
             onPressed: () {
-              context.read<AuthProvider>().completeOnboarding();
+              ref.read(authProvider.notifier).completeOnboarding();
               context.go('/chat-list');
             },
             child: const Text('Skip',
@@ -200,7 +205,7 @@ class _SuggestedFriendsScreenState extends State<SuggestedFriendsScreen> {
               height: 54,
               child: ElevatedButton(
                 onPressed: () {
-                  context.read<AuthProvider>().completeOnboarding();
+                  ref.read(authProvider.notifier).completeOnboarding();
                   context.go('/chat-list');
                 },
                 style: ElevatedButton.styleFrom(
@@ -239,7 +244,8 @@ class _SuggestedFriendsScreenState extends State<SuggestedFriendsScreen> {
           ),
           const SizedBox(height: 24),
           TextButton.icon(
-            onPressed: () => context.read<FriendProvider>().loadSuggestedUsers(limit: 10),
+            onPressed: () =>
+                context.read<FriendProvider>().loadSuggestedUsers(limit: 10),
             icon: const Icon(Icons.refresh),
             label: const Text('Refresh'),
           ),

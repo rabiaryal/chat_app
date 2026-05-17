@@ -21,6 +21,18 @@ mixin FunctionalApiHandler {
         final response = await request();
         final statusCode = response.statusCode ?? 0;
 
+        if (statusCode >= 300 && statusCode < 400) {
+          return Left(
+            ApiFailure(
+              _extractErrorMessage(
+                response.data,
+                'Redirect response received',
+              ),
+              statusCode: statusCode,
+            ),
+          );
+        }
+
         if (statusCode >= 200 && statusCode < 300) {
           return Right(await mapper(response.data));
         }

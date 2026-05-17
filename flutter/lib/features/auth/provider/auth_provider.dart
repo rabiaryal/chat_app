@@ -1,52 +1,106 @@
-/// Auth State Management using Provider
 import 'dart:async';
 
 import 'package:chat_app/constants/api_constant.dart';
+import 'package:chat_app/providers/app_dependencies.dart';
 import 'package:chat_app/services/api_service.dart';
-import 'package:flutter/foundation.dart';
+import 'package:equatable/equatable.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../../services/notification_service.dart';
+import '../../../services/realtime/chat_controller.dart';
+import '../../../services/storage/chat_persistence_service.dart';
+import '../../../services/storage/friend_persistence_service.dart';
 import '../models/user.dart';
-import '../services/realtime/chat_controller.dart';
-import '../services/notification_service.dart';
-import '../services/storage/chat_persistence_service.dart';
-import '../services/storage/friend_persistence_service.dart';
 
-class AuthProvider extends ChangeNotifier {
-  final ApiService apiService;
-  final NotificationService notificationService;
+class AuthState extends Equatable {
+  static const Object _unset = Object();
 
-  User? _currentUser;
-  bool _isLoading = false;
-  bool _isAuthenticating = false;
-  String? _error;
-  bool _isAuthenticated = false;
-  bool _isNewUser = false;
-  int _authEpoch = 0;
+  final User? currentUser;
+  final bool isLoading;
+  final bool isAuthenticating;
+  final String? error;
+  final bool isAuthenticated;
+  final bool isNewUser;
 
-  // Getters
-  User? get currentUser => _currentUser;
-  bool get isLoading => _isLoading;
-  bool get isAuthenticating => _isAuthenticating;
-  String? get error => _error;
-  bool get isAuthenticated => _isAuthenticated;
-  bool get isNewUser => _isNewUser;
+  const AuthState({
+    required this.currentUser,
+    required this.isLoading,
+    required this.isAuthenticating,
+    required this.error,
+    required this.isAuthenticated,
+    required this.isNewUser,
+  });
 
-  AuthProvider({
-    required this.apiService,
-    required this.notificationService,
+  factory AuthState.initial() => const AuthState(
+        currentUser: null,
+        isLoading: false,
+        isAuthenticating: false,
+        error: null,
+        isAuthenticated: false,
+        isNewUser: false,
+      );
+
+  AuthState copyWith({
+    Object? currentUser = _unset,
+    Object? isLoading = _unset,
+    Object? isAuthenticating = _unset,
+    Object? error = _unset,
+    Object? isAuthenticated = _unset,
+    Object? isNewUser = _unset,
   }) {
-    notificationService.setSessionExpiredCallback(handleSessionExpired);
+    return AuthState(
+      currentUser: identical(currentUser, _unset)
+          ? this.currentUser
+          : currentUser as User?,
+      isLoading:
+          identical(isLoading, _unset) ? this.isLoading : isLoading as bool,
+      isAuthenticating: identical(isAuthenticating, _unset)
+          ? this.isAuthenticating
+          : isAuthenticating as bool,
+      error: identical(error, _unset) ? this.error : error as String?,
+      isAuthenticated: identical(isAuthenticated, _unset)
+          ? this.isAuthenticated
+          : isAuthenticated as bool,
+      isNewUser:
+          identical(isNewUser, _unset) ? this.isNewUser : isNewUser as bool,
+    );
   }
 
-  /// Initialize auth state - restore session if available
+  @override
+  List<Object?> get props => [
+        currentUser,
+        isLoading,
+        isAuthenticating,
+        error,
+        isAuthenticated,
+        isNewUser,
+      ];
+}
+
+class AuthNotifier extends StateNotifier<AuthState> {
+  final ApiService apiService;
+  final NotificationService notificationService;
+  int _authEpoch = 0;
+
+  AuthNotifier({
+    required this.apiService,
+    required this.notificationService,
+  }) : super(AuthState.initial()) {
+    notificationService.setSessionExpiredCallback(handleSessionExpired);
+    apiService.setSessionExpiredCallback(handleSessionExpired);
+  }
+
   Future<void> initialize() async {
-    _isLoading = true;
-    _error = null;
-    notifyListeners();
+    state = state.copyWith(isLoading: true, error: null);
 
     final hasLocalSession = apiService.tokenStorage.hasAccessToken();
-    _isAuthenticated = hasLocalSession;
-    _isLoading = false;
-    notifyListeners();
+    state = state.copyWith(
+      isAuthenticated: hasLocalSession,
+      isLoading: false,
+      currentUser: hasLocalSession ? state.currentUser : null,
+      isNewUser: hasLocalSession ? state.isNewUser : false,
+      error: null,
+    );
 
     if (hasLocalSession) {
       final validationEpoch = _authEpoch;
@@ -94,11 +148,15 @@ class AuthProvider extends ChangeNotifier {
             if (validationEpoch != _authEpoch) {
               return;
             }
-            _currentUser = user;
-            _isAuthenticated = true;
-            notifyListeners();
-            print('✓ Session restored, user: ${_currentUser?.username}');
+            state = state.copyWith(
+              currentUser: user,
+              isAuthenticated: true,
+              isLoading: false,
+              error: null,
+            );
+            print('✓ Session restored, user: ${state.currentUser?.username}');
 
+            unawaited(notificationService.initialize());
             final fcmSynced = await notificationService.syncToken();
             if (!fcmSynced) {
               await handleSessionExpired();
@@ -109,7 +167,6 @@ class AuthProvider extends ChangeNotifier {
     );
   }
 
-  /// Register new user
   Future<bool> register({
     required String username,
     required String email,
@@ -117,10 +174,8 @@ class AuthProvider extends ChangeNotifier {
     String? firstName,
     String? lastName,
   }) async {
-    _isAuthenticating = true;
-    _error = null;
+    state = state.copyWith(isAuthenticating: true, error: null);
     _authEpoch++;
-    notifyListeners();
 
     try {
       final result = await apiService
@@ -130,70 +185,78 @@ class AuthProvider extends ChangeNotifier {
             password: password,
             firstName: firstName,
             lastName: lastName,
+            persistSession: true,
           )
           .run();
 
       return result.fold(
         (failure) {
-          _error = failure.message;
-          _isAuthenticating = false;
-          notifyListeners();
+          state = state.copyWith(
+            isAuthenticating: false,
+            error: failure.message,
+          );
           print('✗ Registration failed: ${failure.message}');
           return false;
         },
         (authResponse) {
-          _currentUser = authResponse.user;
-          _isAuthenticated = true;
-          _isNewUser = true; // Mark as new user for routing
-          _isAuthenticating = false;
-          notifyListeners();
+          state = state.copyWith(
+            currentUser: authResponse.user,
+            isAuthenticated: true,
+            isNewUser: true,
+            isAuthenticating: false,
+            error: null,
+          );
+          unawaited(notificationService.initialize());
           print('✓ Registration successful');
           return true;
         },
       );
     } catch (error) {
-      _error = error.toString().replaceAll('Exception: ', '');
-      _isAuthenticating = false;
-      notifyListeners();
+      state = state.copyWith(
+        isAuthenticating: false,
+        error: error.toString().replaceAll('Exception: ', ''),
+      );
       print('✗ Registration threw an exception: $error');
       return false;
     }
   }
 
-  /// Login user
   Future<bool> login({
     required String username,
     required String password,
+    required bool rememberMe,
   }) async {
-    _isAuthenticating = true;
-    _error = null;
+    state = state.copyWith(isAuthenticating: true, error: null);
     _authEpoch++;
-    notifyListeners(); //it trigers the loading indicator
 
     try {
       final result = await apiService
           .login(
             username: username,
             password: password,
+            persistSession: rememberMe,
           )
           .run();
 
       return result.fold(
         (failure) {
-          _error = failure.message;
-          _isAuthenticating = false;
-          notifyListeners();
+          state = state.copyWith(
+            isAuthenticating: false,
+            error: failure.message,
+          );
           print('✗ Login failed: ${failure.message}');
           return false;
         },
-        (authResponse) async {
-          _currentUser = authResponse.user;
-          _isAuthenticated = true;
-          _isAuthenticating = false;
-          notifyListeners();
+        (authResponse) {
+          state = state.copyWith(
+            currentUser: authResponse.user,
+            isAuthenticated: true,
+            isNewUser: false,
+            isAuthenticating: false,
+            error: null,
+          );
 
-          // Sync FCM token in the background so auth success is not blocked by
-          // notification setup or transient network issues.
+          unawaited(notificationService.initialize());
           unawaited(notificationService.syncToken());
 
           print('✓ Login successful');
@@ -201,30 +264,29 @@ class AuthProvider extends ChangeNotifier {
         },
       );
     } catch (error) {
-      _error = error.toString().replaceAll('Exception: ', '');
-      _isAuthenticating = false;
-      notifyListeners();
+      state = state.copyWith(
+        isAuthenticating: false,
+        error: error.toString().replaceAll('Exception: ', ''),
+      );
       print('✗ Login threw an exception: $error');
       return false;
     }
   }
 
-  /// Clear auth state immediately (for instant UI updates)
   void clearAuth() {
-    _currentUser = null;
-    _isAuthenticated = false;
-    _isNewUser = false;
-    notifyListeners();
+    state = state.copyWith(
+      currentUser: null,
+      isAuthenticated: false,
+      isNewUser: false,
+      error: null,
+    );
     print('✓ Auth state cleared');
   }
 
-  /// Mark new user as onboarded (stops redirecting to suggested friends)
   void completeOnboarding() {
-    _isNewUser = false;
-    notifyListeners();
+    state = state.copyWith(isNewUser: false);
   }
 
-  /// Logout user - clears state and navigates immediately, backend cleanup in background
   Future<void> logout() async {
     final logoutEpoch = ++_authEpoch;
     final scopedUserId = apiService.tokenStorage.getCurrentUserId();
@@ -257,9 +319,7 @@ class AuthProvider extends ChangeNotifier {
     ]);
   }
 
-  /// Background logout - handle backend logout and token cleanup without blocking UI
   void _logoutBackground({String? refreshToken}) {
-    // Fire and forget - don't block on these operations
     Future.microtask(() async {
       if (refreshToken != null && refreshToken.isNotEmpty) {
         try {
@@ -288,7 +348,6 @@ class AuthProvider extends ChangeNotifier {
     });
   }
 
-  /// Force a logout when the session is no longer valid.
   Future<void> handleSessionExpired() async {
     _authEpoch++;
     final scopedUserId = apiService.tokenStorage.getCurrentUserId();
@@ -304,21 +363,17 @@ class AuthProvider extends ChangeNotifier {
     }
 
     clearAuth();
-    _error = 'Session expired. Please log in again.';
-    notifyListeners();
+    state = state.copyWith(error: 'Session expired. Please log in again.');
 
     print('✓ Session expired - user logged out');
   }
 
-  /// Change password
   Future<bool> changePassword({
     required String oldPassword,
     required String newPassword,
     required String newPasswordConfirm,
   }) async {
-    _isLoading = true;
-    _error = null;
-    notifyListeners();
+    state = state.copyWith(isLoading: true, error: null);
 
     final result = await apiService
         .changePassword(
@@ -330,69 +385,65 @@ class AuthProvider extends ChangeNotifier {
 
     return result.fold(
       (failure) {
-        _error = failure.message;
-        _isLoading = false;
-        notifyListeners();
+        state = state.copyWith(isLoading: false, error: failure.message);
         print('✗ Change password failed: ${failure.message}');
         return false;
       },
       (_) {
-        _isLoading = false;
-        notifyListeners();
+        state = state.copyWith(isLoading: false, error: null);
         print('✓ Password changed successfully');
         return true;
       },
     );
   }
 
-  /// Delete user account
   Future<bool> deleteAccount() async {
-    _isLoading = true;
-    _error = null;
-    notifyListeners();
+    state = state.copyWith(isLoading: true, error: null);
 
     final result = await apiService.deleteUserAccount().run();
 
     return result.fold(
       (failure) {
-        _error = failure.message;
-        _isLoading = false;
-        notifyListeners();
+        state = state.copyWith(isLoading: false, error: failure.message);
         print('✗ Account deletion failed: ${failure.message}');
         return false;
       },
       (_) {
-        _currentUser = null;
-        _isAuthenticated = false;
-        _isLoading = false;
-        notifyListeners();
+        state = state.copyWith(
+          currentUser: null,
+          isAuthenticated: false,
+          isNewUser: false,
+          isLoading: false,
+          error: null,
+        );
         print('✓ Account deleted successfully');
         return true;
       },
     );
   }
 
-  /// Refresh current user data
   Future<void> refreshUserData() async {
-    _isLoading = true;
-    _error = null;
-    notifyListeners();
+    state = state.copyWith(isLoading: true, error: null);
 
     final result = await apiService.getCurrentUser().run();
 
     result.fold(
       (failure) {
-        _error = failure.message;
-        _isLoading = false;
-        notifyListeners();
+        state = state.copyWith(isLoading: false, error: failure.message);
         print('✗ Failed to refresh user data: ${failure.message}');
       },
       (user) {
-        _currentUser = user;
-        _isLoading = false;
-        notifyListeners();
+        state =
+            state.copyWith(currentUser: user, isLoading: false, error: null);
         print('✓ User data refreshed');
       },
     );
   }
 }
+
+final authProvider = StateNotifierProvider<AuthNotifier, AuthState>((ref) {
+  return AuthNotifier(
+    apiService: ref.read(apiServiceProvider),
+    notificationService: ref.read(notificationServiceProvider),
+  );
+});

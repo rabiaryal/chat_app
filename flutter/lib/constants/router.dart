@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../providers/auth_provider.dart';
 import '../services/storage/hive_token_storage.dart';
-import '../screens/auth/auth_screen.dart';
+import '../features/auth/screen/auth_screen.dart';
 import '../screens/chat/chat_list_screen.dart';
 import '../screens/chat/chat_screen.dart';
 import '../screens/chat/create_group_screen.dart';
@@ -12,104 +12,109 @@ import '../screens/chat/friends_list_screen.dart';
 import '../screens/chat/user_profile_screen.dart';
 import '../screens/splash/first_time_splash.dart';
 import '../screens/splash/suggested_friends_screen.dart';
-import '../models/user.dart';
+import '../features/auth/models/user.dart';
+import '../features/auth/provider/auth_provider.dart';
 
-class AppRouter {
-  static GoRouter createRouter(AuthProvider authProvider) {
-    return GoRouter(
-      initialLocation: '/',
-      refreshListenable: authProvider,
-      redirect: (context, state) {
-        final isAuthenticated = authProvider.isAuthenticated;
-        final isNewUser = authProvider.isNewUser;
-        final hasLocalSession = HiveTokenStorage.instance.hasAccessToken();
+final appRouterProvider = Provider<GoRouter>((ref) {
+  late final GoRouter router;
 
-        final isAuthPath = state.matchedLocation == '/auth';
-        final isSplashPath = state.matchedLocation == '/';
-        final isFirstTimePath = state.matchedLocation == '/first-time';
+  router = GoRouter(
+    initialLocation: '/',
+    redirect: (context, state) {
+      final authState = ref.read(authProvider);
+      final isAuthenticated = authState.isAuthenticated;
+      final isNewUser = authState.isNewUser;
+      final hasLocalSession = HiveTokenStorage.instance.hasAccessToken();
 
-        if (hasLocalSession || isAuthenticated) {
-          if (isAuthPath || isFirstTimePath || isSplashPath) {
-            return isNewUser ? '/suggested-friends' : '/chat-list';
-          }
-          return null;
+      final isAuthPath = state.matchedLocation == '/auth';
+      final isSplashPath = state.matchedLocation == '/';
+      final isFirstTimePath = state.matchedLocation == '/first-time';
+
+      if (hasLocalSession || isAuthenticated) {
+        if (isAuthPath || isFirstTimePath || isSplashPath) {
+          return isNewUser ? '/suggested-friends' : '/chat-list';
         }
-
-        if (!isAuthPath && !isSplashPath && !isFirstTimePath) {
-          return '/auth';
-        }
-
         return null;
-      },
-      routes: [
-        GoRoute(
-          path: '/',
-          builder: (context, state) => const SplashScreenWrapper(),
-        ),
-        GoRoute(
-          path: '/auth',
-          builder: (context, state) => AuthScreen(),
-        ),
-        GoRoute(
-          path: '/first-time',
-          builder: (context, state) => const FirstTimeSplashScreen(),
-        ),
-        GoRoute(
-          path: '/chat-list',
-          builder: (context, state) => const ChatListScreen(),
-        ),
-        GoRoute(
-          path: '/suggested-friends',
-          builder: (context, state) => const SuggestedFriendsScreen(),
-        ),
-        GoRoute(
-          path: '/chat',
-          builder: (context, state) {
-            final extras = state.extra as Map<String, dynamic>;
-            return ChatScreen(
-              roomId: extras['roomId'] as String,
-              roomName: extras['roomName'] as String,
-              userId: extras['userId'] as int,
-              username: extras['username'] as String,
-              friendId: extras['friendId'] as int,
-              isGroup: extras['isGroup'] as bool? ?? false,
-            );
-          },
-        ),
-        GoRoute(
-          path: '/create-group',
-          builder: (context, state) => const CreateGroupScreen(),
-        ),
-        GoRoute(
-          path: '/friends-list',
-          builder: (context, state) => FriendsListScreen(),
-        ),
-        GoRoute(
-          path: '/friend-profile',
-          builder: (context, state) {
-            final extras = state.extra as Map<String, dynamic>;
-            return FriendProfileScreen(
-              userId: extras['userId'] as int,
-              username: extras['username'] as String,
-              avatar: extras['avatar'] as String?,
-              bio: extras['bio'] as String?,
-            );
-          },
-        ),
-        GoRoute(
-          path: '/user-profile',
-          builder: (context, state) {
-            final extras = state.extra as Map<String, dynamic>;
-            return UserProfileScreen(
-              user: extras['user'] as User,
-              isCurrentUser: extras['isCurrentUser'] as bool? ?? false,
-            );
-          },
-        ),
-      ],
-    );
-  }
-}
+      }
+
+      if (!isAuthPath && !isSplashPath && !isFirstTimePath) {
+        return '/auth';
+      }
+
+      return null;
+    },
+    routes: [
+      GoRoute(
+        path: '/',
+        builder: (context, state) => const SplashScreenWrapper(),
+      ),
+      GoRoute(
+        path: '/auth',
+        builder: (context, state) => AuthScreen(),
+      ),
+      GoRoute(
+        path: '/first-time',
+        builder: (context, state) => const FirstTimeSplashScreen(),
+      ),
+      GoRoute(
+        path: '/chat-list',
+        builder: (context, state) => const ChatListScreen(),
+      ),
+      GoRoute(
+        path: '/suggested-friends',
+        builder: (context, state) => const SuggestedFriendsScreen(),
+      ),
+      GoRoute(
+        path: '/chat',
+        builder: (context, state) {
+          final extras = state.extra as Map<String, dynamic>;
+          return ChatScreen(
+            roomId: extras['roomId'] as String,
+            roomName: extras['roomName'] as String,
+            userId: extras['userId'] as int,
+            username: extras['username'] as String,
+            friendId: extras['friendId'] as int,
+            isGroup: extras['isGroup'] as bool? ?? false,
+          );
+        },
+      ),
+      GoRoute(
+        path: '/create-group',
+        builder: (context, state) => const CreateGroupScreen(),
+      ),
+      GoRoute(
+        path: '/friends-list',
+        builder: (context, state) => FriendsListScreen(),
+      ),
+      GoRoute(
+        path: '/friend-profile',
+        builder: (context, state) {
+          final extras = state.extra as Map<String, dynamic>;
+          return FriendProfileScreen(
+            userId: extras['userId'] as int,
+            username: extras['username'] as String,
+            avatar: extras['avatar'] as String?,
+            bio: extras['bio'] as String?,
+          );
+        },
+      ),
+      GoRoute(
+        path: '/user-profile',
+        builder: (context, state) {
+          final extras = state.extra as Map<String, dynamic>;
+          return UserProfileScreen(
+            user: extras['user'] as User,
+            isCurrentUser: extras['isCurrentUser'] as bool? ?? false,
+          );
+        },
+      ),
+    ],
+  );
+
+  ref.listen<AuthState>(authProvider, (_, __) => router.refresh());
+
+  return router;
+});
 
 /// A wrapper for the loading splash screen that redirects based on auth state
 class SplashScreenWrapper extends StatefulWidget {

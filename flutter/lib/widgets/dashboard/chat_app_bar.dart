@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import '../../models/user.dart';
+import '../../features/auth/models/user.dart';
 
 class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
   final Color primaryColor;

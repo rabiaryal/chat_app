@@ -3,13 +3,13 @@ import 'storage/hive_token_storage.dart';
 import 'api/dio_client.dart';
 import 'storage/token_manager.dart';
 import '../utils/functional_api_handler.dart';
-import 'api/auth_api.dart';
+import '../features/auth/services/auth_api.dart';
 import 'api/friend_api.dart';
 import 'api/chat_api.dart';
 import 'api/e2ee_notification_api.dart';
 
 // Re-export AuthResponse so existing callers don't need to change their imports
-export '../models/user.dart' show AuthResponse;
+export '../features/auth/models/user.dart' show AuthResponse;
 
 /// ApiService is the single public facade for all HTTP operations.
 ///

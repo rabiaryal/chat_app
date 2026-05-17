@@ -1,21 +1,30 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
+import 'package:provider/provider.dart' as pprovider;
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/friend_provider.dart';
 import '../../providers/room_provider.dart';
 import '../../screens/chat/create_group_screen.dart';
+import '../../providers/presence_provider.dart';
 
-class UserStatusBar extends StatelessWidget {
+class UserStatusBar extends ConsumerWidget {
   final Color primaryColor;
 
   const UserStatusBar({Key? key, required this.primaryColor}) : super(key: key);
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final presenceSet = ref.watch(presenceProvider);
     return SizedBox(
       height: 100,
-      child: Consumer2<RoomProvider, FriendProvider>(
+      child: pprovider.Consumer2<RoomProvider, FriendProvider>(
         builder: (context, roomProvider, friendProvider, _) {
-          final friends = friendProvider.friends;
+          final friends = presenceSet.isNotEmpty
+              ? friendProvider.friends
+                  .where((friend) => presenceSet.contains(friend.id))
+                  .toList()
+              : friendProvider.friends
+                  .where((friend) => friend.isOnline)
+                  .toList();
           return ListView.builder(
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -65,7 +74,8 @@ class UserStatusBar extends StatelessWidget {
                       padding: const EdgeInsets.all(2),
                       decoration: BoxDecoration(
                           color: primaryColor, shape: BoxShape.circle),
-                      child: const Icon(Icons.add, size: 12, color: Colors.white),
+                      child:
+                          const Icon(Icons.add, size: 12, color: Colors.white),
                     ),
                   ),
                 ),
@@ -95,27 +105,45 @@ class UserStatusBar extends StatelessWidget {
                   border: Border.all(color: Colors.white, width: 2),
                   image: friend.avatar != null
                       ? DecorationImage(
-                          image: NetworkImage(friend.avatar!), fit: BoxFit.cover)
+                          image: NetworkImage(friend.avatar!),
+                          fit: BoxFit.cover)
                       : null,
                   color: Colors.grey[200],
                 ),
                 child: friend.avatar == null
                     ? Center(
                         child: Text(friend.username[0].toUpperCase(),
-                            style: const TextStyle(fontWeight: FontWeight.bold)))
+                            style:
+                                const TextStyle(fontWeight: FontWeight.bold)))
                     : null,
               ),
               if (friend.isOnline)
                 Positioned(
-                  right: 4,
-                  bottom: 4,
+                  right: 2,
+                  bottom: 2,
                   child: Container(
-                    width: 14,
-                    height: 14,
-                    decoration: BoxDecoration(
-                      color: Colors.green,
+                    width: 16,
+                    height: 16,
+                    decoration: const BoxDecoration(
+                      color: Colors.white,
                       shape: BoxShape.circle,
-                      border: Border.all(color: Colors.white, width: 2),
+                    ),
+                    child: Center(
+                      child: Container(
+                        width: 10,
+                        height: 10,
+                        decoration: BoxDecoration(
+                          color: Colors.green,
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.greenAccent.withOpacity(0.35),
+                              blurRadius: 6,
+                              spreadRadius: 1,
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
                   ),
                 ),

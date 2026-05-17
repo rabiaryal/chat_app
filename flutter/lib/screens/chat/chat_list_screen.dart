@@ -1,27 +1,30 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
-import 'package:provider/provider.dart';
+import 'package:provider/provider.dart' as pprovider;
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../providers/room_provider.dart';
 import '../../providers/friend_provider.dart';
+import '../../providers/presence_provider.dart';
 import '../../models/chat_room.dart';
-import '../../models/user.dart';
+import '../../features/auth/models/user.dart';
 import '../../services/api_service.dart';
 import '../../widgets/dashboard/chat_card.dart';
 import '../../widgets/dashboard/chat_app_bar.dart';
 import '../../widgets/dashboard/dashboard_bottom_nav.dart';
 import '../../widgets/chat_bubble.dart';
-import '../../providers/auth_provider.dart';
+import '../../features/auth/provider/auth_provider.dart';
 import 'package:chat_app/utils/error_handler.dart';
+import 'contacts_screen.dart';
 
-class ChatListScreen extends StatefulWidget {
+class ChatListScreen extends ConsumerStatefulWidget {
   const ChatListScreen({Key? key}) : super(key: key);
 
   @override
-  _ChatListScreenState createState() => _ChatListScreenState();
+  ConsumerState<ChatListScreen> createState() => _ChatListScreenState();
 }
 
-class _ChatListScreenState extends State<ChatListScreen> {
+class _ChatListScreenState extends ConsumerState<ChatListScreen> {
   int _selectedTabIndex = 0;
   int _selectedBottomIndex = 0;
   String _searchQuery = '';
@@ -44,8 +47,10 @@ class _ChatListScreenState extends State<ChatListScreen> {
   Future<void> _loadInitialData() async {
     if (!mounted) return;
     setState(() => _isLoading = true);
-    final roomProvider = Provider.of<RoomProvider>(context, listen: false);
-    final friendProvider = Provider.of<FriendProvider>(context, listen: false);
+    final roomProvider =
+        pprovider.Provider.of<RoomProvider>(context, listen: false);
+    final friendProvider =
+        pprovider.Provider.of<FriendProvider>(context, listen: false);
     final apiService = context.read<ApiService>();
 
     await roomProvider.loadRooms();
@@ -78,9 +83,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
     if (_isLoggingOut) return;
     _isLoggingOut = true;
 
-    final authProvider = Provider.of<AuthProvider>(context, listen: false);
-
-    await authProvider.logout();
+    await ref.read(authProvider.notifier).logout();
   }
 
   @override
@@ -88,7 +91,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
     final theme = Theme.of(context);
     final primaryColor = theme.primaryColor;
 
-    return Consumer2<RoomProvider, FriendProvider>(
+    return pprovider.Consumer2<RoomProvider, FriendProvider>(
       builder: (context, roomProvider, friendProvider, _) {
         final hasCachedData = roomProvider.rooms.isNotEmpty ||
             friendProvider.friends.isNotEmpty ||
@@ -97,7 +100,8 @@ class _ChatListScreenState extends State<ChatListScreen> {
 
         final dashboardBody = RefreshIndicator(
           onRefresh: () =>
-              Provider.of<RoomProvider>(context, listen: false).loadRooms(),
+              pprovider.Provider.of<RoomProvider>(context, listen: false)
+                  .loadRooms(),
           child: SingleChildScrollView(
             physics: const AlwaysScrollableScrollPhysics(),
             child: Column(
@@ -127,7 +131,9 @@ class _ChatListScreenState extends State<ChatListScreen> {
           ),
           body: Stack(
             children: [
-              dashboardBody,
+              _selectedBottomIndex == 2
+                  ? const ContactsScreen()
+                  : dashboardBody,
               if (_isLoading && !hasCachedData)
                 const Positioned.fill(
                   child: ColoredBox(
@@ -150,16 +156,23 @@ class _ChatListScreenState extends State<ChatListScreen> {
   }
 
   Widget _buildHorizontalList(Color primaryColor) {
-    return Consumer<FriendProvider>(
+    return pprovider.Consumer<FriendProvider>(
       builder: (context, friendProvider, _) {
-        final friends = friendProvider.friends;
+        final presenceSet = ref.watch(presenceProvider);
+        final onlineFriends = presenceSet.isNotEmpty
+            ? friendProvider.friends
+                .where((friend) => presenceSet.contains(friend.id))
+                .toList()
+            : friendProvider.friends
+                .where((friend) => friend.isOnline)
+                .toList();
         return Container(
           height: 110.h,
           margin: EdgeInsets.symmetric(vertical: 10.h),
           child: ListView.builder(
             scrollDirection: Axis.horizontal,
             padding: EdgeInsets.symmetric(horizontal: 16.w),
-            itemCount: friends.length + 1,
+            itemCount: onlineFriends.length + 1,
             itemBuilder: (context, index) {
               if (index == 0) {
                 // New Group Button
@@ -197,7 +210,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                 );
               }
 
-              final friend = friends[index - 1];
+              final friend = onlineFriends[index - 1];
 
               return Padding(
                 padding: EdgeInsets.only(right: 15.w),
@@ -206,7 +219,8 @@ class _ChatListScreenState extends State<ChatListScreen> {
                     GestureDetector(
                       onTap: () async {
                         final roomProvider =
-                            Provider.of<RoomProvider>(context, listen: false);
+                            pprovider.Provider.of<RoomProvider>(context,
+                                listen: false);
                         final apiService = context.read<ApiService>();
 
                         final result = await apiService
@@ -289,22 +303,35 @@ class _ChatListScreenState extends State<ChatListScreen> {
                                       ),
                                     ),
                             ),
-                            // Online indicator
-                            if (friend.isOnline)
-                              Positioned(
-                                bottom: 0,
-                                right: 0,
-                                child: Container(
-                                  width: 14.w,
-                                  height: 14.w,
-                                  decoration: BoxDecoration(
-                                    color: Colors.green,
-                                    shape: BoxShape.circle,
-                                    border: Border.all(
-                                        color: Colors.white, width: 2.w),
+                            Positioned(
+                              right: 2,
+                              bottom: 2,
+                              child: Container(
+                                width: 16.w,
+                                height: 16.w,
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: Center(
+                                  child: Container(
+                                    width: 10.w,
+                                    height: 10.w,
+                                    decoration: BoxDecoration(
+                                      color: Colors.green,
+                                      shape: BoxShape.circle,
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.green.withOpacity(0.35),
+                                          blurRadius: 6,
+                                          spreadRadius: 1,
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                 ),
                               ),
+                            ),
                           ],
                         ),
                       ),
@@ -398,7 +425,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
   }
 
   Widget _buildChatList(Color primaryColor) {
-    return Consumer<RoomProvider>(
+    return pprovider.Consumer<RoomProvider>(
       builder: (context, roomProvider, _) {
         List<ChatRoom> rooms = roomProvider.rooms;
 
@@ -455,7 +482,8 @@ class _ChatListScreenState extends State<ChatListScreen> {
         }
 
         return ListView.builder(
-          shrinkWrap: true,//means i will take the item only neccessary for my information
+          shrinkWrap:
+              true, //means i will take the item only neccessary for my information
           physics: const NeverScrollableScrollPhysics(),
           itemCount: rooms.length,
           itemBuilder: (context, index) {

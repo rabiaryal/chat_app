@@ -1,11 +1,11 @@
 /// Authentication Screen (Login/Register)
-import 'package:chat_app/screens/auth/login_screen.dart';
-import 'package:chat_app/screens/auth/resgister_screen.dart';
+import 'package:chat_app/features/auth/screen/login_screen.dart';
+import 'package:chat_app/features/auth/screen/resgister_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
-import '../../services/api_service.dart';
-import '../../models/user.dart';
-import '../../utils/snackbar_utils.dart';
+import '../../../services/api_service.dart';
+import '../models/user.dart';
+import '../../../utils/snackbar_utils.dart';
 
 class AuthScreen extends StatefulWidget {
   @override

@@ -1,6 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:fpdart/fpdart.dart';
-import '../../models/user.dart';
+import '../../features/auth/models/user.dart';
 import '../../models/friend.dart';
 import '../../constants/api_constant.dart';
 import '../../utils/failure.dart';

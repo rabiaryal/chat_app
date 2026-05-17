@@ -1,12 +1,14 @@
 /// User Profile Screen - Full Page
+import 'package:chat_app/providers/presence_provider.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:provider/provider.dart';
-import '../../models/user.dart';
-import '../../providers/auth_provider.dart';
+import '../../features/auth/models/user.dart';
+import '../../features/auth/provider/auth_provider.dart';
 import '../../services/notification_service.dart';
 
-class UserProfileScreen extends StatefulWidget {
+class UserProfileScreen extends ConsumerStatefulWidget {
   final User user;
   final bool isCurrentUser;
 
@@ -17,10 +19,10 @@ class UserProfileScreen extends StatefulWidget {
   }) : super(key: key);
 
   @override
-  State<UserProfileScreen> createState() => _UserProfileScreenState();
+  ConsumerState<UserProfileScreen> createState() => _UserProfileScreenState();
 }
 
-class _UserProfileScreenState extends State<UserProfileScreen> {
+class _UserProfileScreenState extends ConsumerState<UserProfileScreen> {
   bool _notificationsEnabled = true;
   bool _loadingNotifications = false;
   bool _updatingNotifications = false;
@@ -148,35 +150,39 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                     ),
                     SizedBox(height: 12.h),
                     // Status Badge
-                    Container(
-                      padding:
-                          EdgeInsets.symmetric(horizontal: 16.w, vertical: 8.h),
-                      decoration: BoxDecoration(
-                        color: (user.isOnline || isCurrentUser)
-                            ? Colors.green
-                            : Colors.grey,
-                        borderRadius: BorderRadius.circular(20.r),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          CircleAvatar(
-                            radius: 4.r,
-                            backgroundColor: Colors.white,
-                          ),
-                          SizedBox(width: 8.w),
-                          Text(
-                            (user.isOnline || isCurrentUser)
-                                ? 'Online'
-                                : 'Offline',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w600,
+                    Builder(builder: (context) {
+                      final presenceSet = ref.watch(presenceProvider);
+                      final isOnline = presenceSet.isNotEmpty
+                          ? presenceSet.contains(user.id)
+                          : user.isOnline;
+                      final showOnline = isOnline || isCurrentUser;
+
+                      return Container(
+                        padding: EdgeInsets.symmetric(
+                            horizontal: 16.w, vertical: 8.h),
+                        decoration: BoxDecoration(
+                          color: (showOnline) ? Colors.green : Colors.grey,
+                          borderRadius: BorderRadius.circular(20.r),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            CircleAvatar(
+                              radius: 4.r,
+                              backgroundColor: Colors.white,
                             ),
-                          ),
-                        ],
-                      ),
-                    ),
+                            SizedBox(width: 8.w),
+                            Text(
+                              (showOnline) ? 'Online' : 'Offline',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }),
                   ],
                 ),
               ),
@@ -307,7 +313,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
           ElevatedButton(
             onPressed: () {
               Navigator.pop(dialogContext);
-              context.read<AuthProvider>().logout();
+              ref.read(authProvider.notifier).logout();
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.red[400],

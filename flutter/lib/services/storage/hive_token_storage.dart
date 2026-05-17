@@ -13,6 +13,9 @@ class HiveTokenStorage {
 
   late Box<String> _tokenBox;
   bool _isInitialized = false;
+  bool _persistSession = true;
+  String? _sessionAccessToken;
+  String? _sessionRefreshToken;
 
   // Private constructor
   HiveTokenStorage._internal();
@@ -50,17 +53,32 @@ class HiveTokenStorage {
   Future<void> saveTokens({
     required String accessToken,
     required String refreshToken,
+    bool? persistSession,
   }) async {
     if (!_isInitialized) {
       print('⚠ HiveTokenStorage not initialized yet - cannot save tokens');
       return;
     }
     try {
-      await Future.wait([
-        _tokenBox.put(_accessTokenKey, accessToken),
-        _tokenBox.put(_refreshTokenKey, refreshToken),
-      ]);
-      print('✓ Tokens saved to Hive storage');
+      _persistSession = persistSession ?? _persistSession;
+
+      if (_persistSession) {
+        _sessionAccessToken = null;
+        _sessionRefreshToken = null;
+        await Future.wait([
+          _tokenBox.put(_accessTokenKey, accessToken),
+          _tokenBox.put(_refreshTokenKey, refreshToken),
+        ]);
+        print('✓ Tokens saved to Hive storage');
+      } else {
+        await Future.wait([
+          _tokenBox.delete(_accessTokenKey),
+          _tokenBox.delete(_refreshTokenKey),
+        ]);
+        _sessionAccessToken = accessToken;
+        _sessionRefreshToken = refreshToken;
+        print('✓ Tokens saved for this session only');
+      }
     } catch (e) {
       print('✗ Error saving tokens to Hive: $e');
       rethrow;
@@ -74,7 +92,7 @@ class HiveTokenStorage {
       return null;
     }
     try {
-      return _tokenBox.get(_accessTokenKey);
+      return _sessionAccessToken ?? _tokenBox.get(_accessTokenKey);
     } catch (e) {
       print('✗ Error reading access token: $e');
       return null;
@@ -88,7 +106,7 @@ class HiveTokenStorage {
       return null;
     }
     try {
-      return _tokenBox.get(_refreshTokenKey);
+      return _sessionRefreshToken ?? _tokenBox.get(_refreshTokenKey);
     } catch (e) {
       print('✗ Error reading refresh token: $e');
       return null;
@@ -159,6 +177,9 @@ class HiveTokenStorage {
       return;
     }
     try {
+      _sessionAccessToken = null;
+      _sessionRefreshToken = null;
+      _persistSession = true;
       await Future.wait([
         _tokenBox.delete(_accessTokenKey),
         _tokenBox.delete(_refreshTokenKey),
@@ -177,6 +198,8 @@ class HiveTokenStorage {
       'refreshToken': getRefreshToken(),
     };
   }
+
+  bool get isSessionPersisted => _persistSession;
 
   /// Close Hive box
   Future<void> close() async {

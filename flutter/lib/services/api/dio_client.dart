@@ -32,7 +32,8 @@ class AuthInterceptor extends Interceptor {
         print('🔐 Token added to request: ${options.path}');
       }
     } else {
-      print('🔐 Auth request detected, skipping token injection: ${options.path}');
+      print(
+          '🔐 Auth request detected, skipping token injection: ${options.path}');
     }
 
     options.headers['Content-Type'] = 'application/json';
@@ -52,7 +53,8 @@ class AuthInterceptor extends Interceptor {
       if (requestOptions.path.contains('/auth/login/') ||
           requestOptions.path.contains('/auth/register/') ||
           requestOptions.path.contains('/auth/logout/')) {
-        print('ℹ Skipping token refresh for auth endpoint: ${requestOptions.path}');
+        print(
+            'ℹ Skipping token refresh for auth endpoint: ${requestOptions.path}');
         return handler.next(response);
       }
 
@@ -72,7 +74,8 @@ class AuthInterceptor extends Interceptor {
           _isRefreshing = false;
 
           if (refreshed) {
-            print('✓ Token refreshed, retrying request: ${requestOptions.path}');
+            print(
+                '✓ Token refreshed, retrying request: ${requestOptions.path}');
             return handler.resolve(await _retry(requestOptions));
           }
         } else {
@@ -109,7 +112,7 @@ class AuthInterceptor extends Interceptor {
         baseUrl: baseUrl,
         connectTimeout: Duration(seconds: 10),
         receiveTimeout: Duration(seconds: 10),
-        validateStatus: (status) => status != null && status < 500,
+        validateStatus: (status) => status != null && status < 600,
       ));
 
       final response = await dio.post(
@@ -123,6 +126,7 @@ class AuthInterceptor extends Interceptor {
         await tokenStorage.saveTokens(
           accessToken: newAccessToken,
           refreshToken: refreshToken,
+          persistSession: tokenStorage.isSessionPersisted,
         );
         print('✓ Access token refreshed successfully');
         return true;
@@ -148,7 +152,7 @@ class AuthInterceptor extends Interceptor {
       baseUrl: baseUrl,
       connectTimeout: Duration(seconds: 10),
       receiveTimeout: Duration(seconds: 10),
-      validateStatus: (status) => status != null && status < 500,
+      validateStatus: (status) => status != null && status < 600,
     ));
 
     final accessToken = tokenStorage.getAccessToken();
@@ -185,7 +189,7 @@ class DioClient {
         baseUrl: baseUrl,
         connectTimeout: Duration(seconds: 10),
         receiveTimeout: Duration(seconds: 10),
-        validateStatus: (status) => status != null && status < 500,
+        validateStatus: (status) => status != null && status < 600,
         headers: {'Content-Type': 'application/json'},
       ),
     );

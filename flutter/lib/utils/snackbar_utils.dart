@@ -1,3 +1,4 @@
+import 'package:chat_app/app/app.dart';
 import 'package:flutter/material.dart';
 import '../main.dart';
 

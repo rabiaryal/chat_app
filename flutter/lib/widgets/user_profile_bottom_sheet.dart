@@ -1,8 +1,10 @@
 /// User Profile Bottom Sheet Widget
 import 'package:flutter/material.dart';
-import '../models/user.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../features/auth/models/user.dart';
+import '../providers/presence_provider.dart';
 
-class UserProfileBottomSheet extends StatelessWidget {
+class UserProfileBottomSheet extends ConsumerWidget {
   final User user;
   final VoidCallback onLogout;
 
@@ -13,7 +15,11 @@ class UserProfileBottomSheet extends StatelessWidget {
   }) : super(key: key);
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final presenceSet = ref.watch(presenceProvider);
+    final isOnline =
+        presenceSet.isNotEmpty ? presenceSet.contains(user.id) : user.isOnline;
+
     return Container(
       padding: EdgeInsets.fromLTRB(16, 24, 16, 32),
       decoration: BoxDecoration(
@@ -88,8 +94,8 @@ class UserProfileBottomSheet extends StatelessWidget {
             _buildInfoCard(
               icon: Icons.info_outlined,
               label: 'Status',
-              value: user.isOnline ? 'Online' : 'Offline',
-              valueColor: user.isOnline ? Colors.green : Colors.grey,
+              value: isOnline ? 'Online' : 'Offline',
+              valueColor: isOnline ? Colors.green : Colors.grey,
             ),
             SizedBox(height: 32),
             // Logout Button

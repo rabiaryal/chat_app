@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../../models/user.dart';
+import '../../features/auth/models/user.dart';
 import '../../screens/chat/friends_list_screen.dart';
 
 class DashboardBottomNav extends StatelessWidget {

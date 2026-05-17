@@ -82,6 +82,7 @@ class TokenManager {
   Future<void> saveTokens({
     required String accessToken,
     required String refreshToken,
+    bool? persistSession,
   }) async {
     try {
       final payload = _decodeToken(accessToken);
@@ -92,12 +93,14 @@ class TokenManager {
       await tokenStorage.saveTokens(
         accessToken: accessToken,
         refreshToken: refreshToken,
+        persistSession: persistSession,
       );
 
       _scheduleTokenRefresh(payload);
 
       print('✓ Tokens saved to Hive storage');
-      print('  Access token expires in: ${payload.timeUntilExpiry.inMinutes} minutes');
+      print(
+          '  Access token expires in: ${payload.timeUntilExpiry.inMinutes} minutes');
     } catch (e) {
       print('Error saving tokens: $e');
       rethrow;
@@ -157,7 +160,8 @@ class TokenManager {
     }
 
     _refreshTimer = Timer(timeUntilRefresh, _handleTokenRefresh);
-    print('📅 Token refresh scheduled in ${timeUntilRefresh.inMinutes} minutes');
+    print(
+        '📅 Token refresh scheduled in ${timeUntilRefresh.inMinutes} minutes');
   }
 
   Future<void> _handleTokenRefresh() async {

@@ -1,5 +1,5 @@
 import 'package:hive_flutter/hive_flutter.dart';
-import '../../models/user.dart';
+import '../../features/auth/models/user.dart';
 import 'hive_token_storage.dart';
 
 /// Hive-backed persistence for the user's friend list.
@@ -33,7 +33,11 @@ class FriendPersistenceService {
 
     final Map<dynamic, Map<String, dynamic>> friendsMap = {};
     for (final friend in friends) {
-      friendsMap[friend.id] = friend.toJson();
+      final json = Map<String, dynamic>.from(friend.toJson());
+      // Do not persist volatile presence fields to Hive; keep them runtime-only
+      json.remove('is_online');
+      json.remove('last_seen');
+      friendsMap[friend.id] = json;
     }
 
     await box.putAll(friendsMap);
@@ -44,7 +48,10 @@ class FriendPersistenceService {
     final box = await _openBox();
 
     for (final friend in friends) {
-      await box.put(friend.id, friend.toJson());
+      final json = Map<String, dynamic>.from(friend.toJson());
+      json.remove('is_online');
+      json.remove('last_seen');
+      await box.put(friend.id, json);
     }
   }
 

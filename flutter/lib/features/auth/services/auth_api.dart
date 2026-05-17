@@ -1,10 +1,10 @@
 import 'package:dio/dio.dart';
 import 'package:fpdart/fpdart.dart';
-import '../../models/user.dart';
-import '../../constants/api_constant.dart';
-import '../../utils/failure.dart';
-import '../../utils/functional_api_handler.dart';
-import '../storage/hive_token_storage.dart';
+import '../models/user.dart';
+import '../../../constants/api_constant.dart';
+import '../../../utils/failure.dart';
+import '../../../utils/functional_api_handler.dart';
+import '../../../services/storage/hive_token_storage.dart';
 
 /// Authentication-related API endpoints
 mixin AuthApi on FunctionalApiHandler {
@@ -18,6 +18,7 @@ mixin AuthApi on FunctionalApiHandler {
     required String password,
     String? firstName,
     String? lastName,
+    bool persistSession = true,
   }) =>
       makeRequest(
         () => dio.post(
@@ -31,7 +32,7 @@ mixin AuthApi on FunctionalApiHandler {
             'last_name': lastName ?? '',
           },
           options: Options(
-            validateStatus: (status) => status != null && status < 500,
+            validateStatus: (status) => status != null && status < 600,
           ),
         ),
         (data) async {
@@ -39,6 +40,7 @@ mixin AuthApi on FunctionalApiHandler {
           await tokenStorage.saveTokens(
             accessToken: authResponse.accessToken,
             refreshToken: authResponse.refreshToken,
+            persistSession: persistSession,
           );
           return authResponse;
         },
@@ -48,13 +50,14 @@ mixin AuthApi on FunctionalApiHandler {
   TaskEither<Failure, AuthResponse> login({
     required String username,
     required String password,
+    bool persistSession = true,
   }) =>
       makeRequest(
         () => dio.post(
           ApiConstant.login,
           data: {'username': username, 'password': password},
           options: Options(
-            validateStatus: (status) => status != null && status < 500,
+            validateStatus: (status) => status != null && status < 600,
           ),
         ),
         (data) async {
@@ -62,6 +65,7 @@ mixin AuthApi on FunctionalApiHandler {
           await tokenStorage.saveTokens(
             accessToken: authResponse.accessToken,
             refreshToken: authResponse.refreshToken,
+            persistSession: persistSession,
           );
           return authResponse;
         },

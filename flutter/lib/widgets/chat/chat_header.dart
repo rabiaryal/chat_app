@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:provider/provider.dart' as pprovider;
 import '../../providers/chat_provider.dart';
 import '../../providers/friend_provider.dart';
+import '../../providers/presence_provider.dart';
 import 'header/widgets/chat_header_menu.dart';
 
-class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
+class ChatHeader extends ConsumerWidget implements PreferredSizeWidget {
   final String roomId;
   final String roomName;
   final bool isGroup;
@@ -19,7 +21,7 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
   }) : super(key: key);
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return AppBar(
       titleSpacing: 0,
       title: Row(
@@ -46,58 +48,33 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
                   overflow: TextOverflow.ellipsis,
                 ),
                 if (!isGroup)
-                  Consumer<FriendProvider>(
-                    builder: (context, friendProvider, child) {
-                      final isOnline = friendProvider.isUserOnline(friendId);
-                      final statusText = isOnline ? 'Online' : 'Offline';
-                      final statusColor = isOnline ? Colors.green : Colors.grey;
+                  Builder(builder: (context) {
+                    final presenceSet = ref.watch(presenceProvider);
+                    final friendProvider =
+                        pprovider.Provider.of<FriendProvider>(context,
+                            listen: false);
+                    final isOnline = presenceSet.isNotEmpty
+                        ? presenceSet.contains(friendId)
+                        : friendProvider.isUserOnline(friendId);
+                    final statusText = isOnline ? 'Online' : 'Offline';
+                    final statusColor = isOnline ? Colors.green : Colors.grey;
 
-                      return Row(
-                        children: [
-                          Container(
-                            width: 8,
-                            height: 8,
-                            decoration: BoxDecoration(
-                                color: statusColor, shape: BoxShape.circle),
-                          ),
-                          const SizedBox(width: 4),
-                          Text(
-                            statusText,
-                            style: TextStyle(fontSize: 12, color: statusColor),
-                          ),
-                        ],
-                      );
-                    },
-                  ),
-                Consumer<ChatProvider>(
-                  builder: (context, chatProvider, child) {
-                    final isConnected = chatProvider.isConnected;
-                    final statusText =
-                        isConnected ? 'Live' : 'Offline (Reading Cache)';
-                    final statusColor = isConnected ? Colors.green : Colors.red;
-
-                    return Padding(
-                      padding: const EdgeInsets.only(top: 2),
-                      child: Row(
-                        children: [
-                          Container(
-                            width: 8,
-                            height: 8,
-                            decoration: BoxDecoration(
-                              color: statusColor,
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                          const SizedBox(width: 4),
-                          Text(
-                            statusText,
-                            style: TextStyle(fontSize: 12, color: statusColor),
-                          ),
-                        ],
-                      ),
+                    return Row(
+                      children: [
+                        Container(
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                              color: statusColor, shape: BoxShape.circle),
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          statusText,
+                          style: TextStyle(fontSize: 12, color: statusColor),
+                        ),
+                      ],
                     );
-                  },
-                ),
+                  }),
               ],
             ),
           ),
@@ -118,3 +95,5 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
   @override
   Size get preferredSize => const Size.fromHeight(kToolbarHeight);
 }
+
+// removed stray class

@@ -427,6 +427,7 @@ class SocketService {
   }
 
   Future<void> _flushPendingMessages(String roomId) async {
+    await _persistenceService.initialize();
     final box = Hive.box<Map>('chat_box');
     final pendingMessages = box.values
         .map((value) => MessageModel.fromJson(Map<String, dynamic>.from(value)))
@@ -469,6 +470,7 @@ class SocketService {
 
   Future<void> _clearLocalState() async {
     try {
+      await _persistenceService.initialize();
       final chatBox = Hive.box<Map>('chat_box');
       await chatBox.clear();
     } catch (_) {}

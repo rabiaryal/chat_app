@@ -11,6 +11,7 @@ import '../../utils/error_handler.dart';
 import '../../widgets/chat/chat_header.dart';
 import '../../widgets/chat/chat_input.dart';
 import '../../widgets/chat_bubble.dart';
+import '../../services/storage/chat_persistence_service.dart';
 
 class ChatScreen extends StatefulWidget {
   final String roomId;
@@ -37,12 +38,14 @@ class ChatScreen extends StatefulWidget {
 class _ChatScreenState extends State<ChatScreen> {
   final ScrollController _scrollController = ScrollController();
   late ChatProvider _chatProvider;
+  late Future<Box<Map>> _chatBoxFuture;
 
   @override
   void initState() {
     super.initState();
     _chatProvider = context.read<ChatProvider>();
     _chatProvider.addListener(_onChatError);
+    _chatBoxFuture = _ensureChatBox();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final roomProvider = context.read<RoomProvider>();
@@ -59,6 +62,12 @@ class _ChatScreenState extends State<ChatScreen> {
         }
       });
     });
+  }
+
+  Future<Box<Map>> _ensureChatBox() async {
+    final chatPersistence = ChatPersistenceService();
+    await chatPersistence.initialize();
+    return Hive.box<Map>('chat_box');
   }
 
   void _onChatError() {
@@ -109,115 +118,136 @@ class _ChatScreenState extends State<ChatScreen> {
           Expanded(
             child: RefreshIndicator(
               onRefresh: _refreshMessages,
-              child: Consumer<ChatProvider>(
-                //this conusmer is used to provide the error , loading state , etc , 
-                builder: (context, chatProvider, _) {
-                  return ValueListenableBuilder<Box<Map>>(
-                    valueListenable: Hive.box<Map>('chat_box').listenable(),// this is hardcoded has to be user specific
-                    builder: (context, box, _) {
-                      final messages = box.values
-                          .map(
-                            (value) => MessageModel.fromJson(
-                              Map<String, dynamic>.from(value),
-                            ),
-                          )
-                          .where((message) => message.roomId == widget.roomId)
-                          .map((message) => message.toChatMessage())
-                          .toList()
-                        ..sort(
-                          (left, right) =>
-                              left.timestamp.compareTo(right.timestamp),
-                        );
+              child: FutureBuilder<Box<Map>>(
+                future: _chatBoxFuture,
+                builder: (context, boxSnapshot) {
+                  if (!boxSnapshot.hasData) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
 
-                      final isInitialLoading =
-                          chatProvider.isLoading && messages.isEmpty;
-                      final showTypingIndicator =
-                          chatProvider.typingIndicator != null &&
-                              messages.isNotEmpty;
+                  final box = boxSnapshot.data!;
 
-                      if (messages.isNotEmpty) {
-                        WidgetsBinding.instance
-                            .addPostFrameCallback((_) => _scrollToBottom());
-                      }
-
-                      return ListView.builder(
-                        controller: _scrollController,
-                        physics: const AlwaysScrollableScrollPhysics(),
-                        itemCount: isInitialLoading
-                            ? 1
-                            : messages.isEmpty
-                                ? 1
-                                : messages.length +
-                                    (showTypingIndicator ? 1 : 0),
-                        itemBuilder: (context, index) {
-                          if (isInitialLoading) {
-                            return SizedBox(
-                              height: MediaQuery.of(context).size.height * 0.7,
-                              child: const Center(
-                                child: CircularProgressIndicator(),
-                              ),
-                            );
-                          }
-
-                          if (chatProvider.error != null && messages.isEmpty) {
-                            return SizedBox(
-                              height: MediaQuery.of(context).size.height * 0.7,
-                              child: Center(
-                                child: Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Icon(
-                                      Icons.error_outline,
-                                      size: 48.sp,
-                                      color: Colors.red,
-                                    ),
-                                    SizedBox(height: 16.h),
-                                    Text('Error: ${chatProvider.error}'),
-                                    SizedBox(height: 16.h),
-                                    ElevatedButton(
-                                      onPressed: () => chatProvider.reconnect(),
-                                      child: const Text('Retry'),
-                                    ),
-                                  ],
+                  return Consumer<ChatProvider>(
+                    builder: (context, chatProvider, _) {
+                      return ValueListenableBuilder<Box<Map>>(
+                        valueListenable: box.listenable(),
+                        builder: (context, box, _) {
+                          final messages = box.values
+                              .map(
+                                (value) => MessageModel.fromJson(
+                                  Map<String, dynamic>.from(value),
                                 ),
-                              ),
+                              )
+                              .where(
+                                (message) => message.roomId == widget.roomId,
+                              )
+                              .map((message) => message.toChatMessage())
+                              .toList()
+                            ..sort(
+                              (left, right) =>
+                                  left.timestamp.compareTo(right.timestamp),
                             );
+
+                          final isInitialLoading =
+                              chatProvider.isLoading && messages.isEmpty;
+                          final showTypingIndicator =
+                              chatProvider.typingIndicator != null &&
+                                  messages.isNotEmpty;
+
+                          if (messages.isNotEmpty) {
+                            WidgetsBinding.instance
+                                .addPostFrameCallback((_) => _scrollToBottom());
                           }
 
-                          if (messages.isEmpty) {
-                            return SizedBox(
-                              height: MediaQuery.of(context).size.height * 0.7,
-                              child: Center(
-                                child: EmptyChat(roomName: widget.roomName),
-                              ),
-                            );
-                          }
+                          return ListView.builder(
+                            controller: _scrollController,
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            itemCount: isInitialLoading
+                                ? 1
+                                : messages.isEmpty
+                                    ? 1
+                                    : messages.length +
+                                        (showTypingIndicator ? 1 : 0),
+                            itemBuilder: (context, index) {
+                              if (isInitialLoading) {
+                                return SizedBox(
+                                  height:
+                                      MediaQuery.of(context).size.height * 0.7,
+                                  child: const Center(
+                                    child: CircularProgressIndicator(),
+                                  ),
+                                );
+                              }
 
-                          if (showTypingIndicator && index == messages.length) {
-                            return TypingIndicator(
-                              username:
-                                  chatProvider.typingIndicator?.username ??
-                                      'AI Assistant',
-                              isBot: true,
-                            );
-                          }
+                              if (chatProvider.error != null &&
+                                  messages.isEmpty) {
+                                return SizedBox(
+                                  height:
+                                      MediaQuery.of(context).size.height * 0.7,
+                                  child: Center(
+                                    child: Column(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      children: [
+                                        Icon(
+                                          Icons.error_outline,
+                                          size: 48.sp,
+                                          color: Colors.red,
+                                        ),
+                                        SizedBox(height: 16.h),
+                                        Text('Error: ${chatProvider.error}'),
+                                        SizedBox(height: 16.h),
+                                        ElevatedButton(
+                                          onPressed: () =>
+                                              chatProvider.reconnect(),
+                                          child: const Text('Retry'),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                );
+                              }
 
-                          final message = messages[index];
-                          final isCurrentUser = message.userId == widget.userId;
+                              if (messages.isEmpty) {
+                                return SizedBox(
+                                  height:
+                                      MediaQuery.of(context).size.height * 0.7,
+                                  child: Center(
+                                    child: EmptyChat(roomName: widget.roomName),
+                                  ),
+                                );
+                              }
 
-                          if (!isCurrentUser &&
-                              !message.isBot &&
-                              message.status != MessageStatus.read) {
-                            WidgetsBinding.instance.addPostFrameCallback((_) {
-                              chatProvider.markAsRead(message.id);
-                            });
-                          }
+                              if (showTypingIndicator &&
+                                  index == messages.length) {
+                                return TypingIndicator(
+                                  username:
+                                      chatProvider.typingIndicator?.username ??
+                                          'AI Assistant',
+                                  isBot: true,
+                                );
+                              }
 
-                          return ChatBubble(
-                            key: ValueKey(message.id),
-                            message: message,
-                            isCurrentUser: isCurrentUser,
-                            showAvatar: !isCurrentUser,
+                              final message = messages[index];
+                              final isCurrentUser =
+                                  message.userId == widget.userId;
+
+                              if (!isCurrentUser &&
+                                  !message.isBot &&
+                                  message.status != MessageStatus.read) {
+                                WidgetsBinding.instance
+                                    .addPostFrameCallback((_) {
+                                  chatProvider.markAsRead(message.id);
+                                });
+                              }
+
+                              return ChatBubble(
+                                key: ValueKey(message.id),
+                                message: message,
+                                isCurrentUser: isCurrentUser,
+                                showAvatar: !isCurrentUser,
+                              );
+                            },
                           );
                         },
                       );
